@@ -124,7 +124,7 @@ function login(email, role) {
   document.getElementById('app').classList.remove('d-none');
   renderSidebar();
   renderNotifDropdown();
-  navigateTo('dashboard');
+  navigateTo(window.__INITIAL_VIEW__ || 'dashboard');
 }
 
 function logout() {

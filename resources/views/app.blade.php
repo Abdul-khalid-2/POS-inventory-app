@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NovaPOS — Point of Sale & Inventory</title>
+    <title>{{ $title ?? 'NovaPOS — Point of Sale & Inventory' }}</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234f46e5'/><text x='50' y='66' font-size='52' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'>N</text></svg>" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/style.css" />
-    <meta property="og:image" content="https://bolt.new/static/og_default.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
-</head>
+    <link rel="stylesheet" href="{{ asset('assets/css/style.css') }}" />
+  </head>
   <body>
+    {{-- The initial view requested via the Laravel route. app.js reads this on first login. --}}
+    <script>window.__INITIAL_VIEW__ = @json($view ?? 'dashboard');</script>
+
     <div id="login-view"></div>
     <div id="app" class="d-none">
       <button class="btn btn-primary d-lg-none sidebar-toggle-btn" id="sidebarToggle" type="button" aria-label="Toggle menu">
@@ -81,23 +81,24 @@
     </div>
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
     <div id="modalRoot"></div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="js/data.js"></script>
-    <script src="js/helpers.js"></script>
-    <script src="js/app.js"></script>
-    <script src="js/views/login.js"></script>
-    <script src="js/views/dashboard.js"></script>
-    <script src="js/views/pos.js"></script>
-    <script src="js/views/products.js"></script>
-    <script src="js/views/sales.js"></script>
-    <script src="js/views/inventory.js"></script>
-    <script src="js/views/purchases.js"></script>
-    <script src="js/views/people.js"></script>
-    <script src="js/views/orders.js"></script>
-    <script src="js/views/accounts.js"></script>
-    <script src="js/views/reports.js"></script>
-    <script src="js/views/settings.js"></script>
-    <script src="js/views/notifications.js"></script>
+    <script src="{{ asset('assets/js/data.js') }}"></script>
+    <script src="{{ asset('assets/js/helpers.js') }}"></script>
+    <script src="{{ asset('assets/js/app.js') }}"></script>
+    <script src="{{ asset('assets/js/views/login.js') }}"></script>
+    <script src="{{ asset('assets/js/views/dashboard.js') }}"></script>
+    <script src="{{ asset('assets/js/views/pos.js') }}"></script>
+    <script src="{{ asset('assets/js/views/products.js') }}"></script>
+    <script src="{{ asset('assets/js/views/sales.js') }}"></script>
+    <script src="{{ asset('assets/js/views/inventory.js') }}"></script>
+    <script src="{{ asset('assets/js/views/purchases.js') }}"></script>
+    <script src="{{ asset('assets/js/views/people.js') }}"></script>
+    <script src="{{ asset('assets/js/views/orders.js') }}"></script>
+    <script src="{{ asset('assets/js/views/accounts.js') }}"></script>
+    <script src="{{ asset('assets/js/views/reports.js') }}"></script>
+    <script src="{{ asset('assets/js/views/settings.js') }}"></script>
+    <script src="{{ asset('assets/js/views/notifications.js') }}"></script>
   </body>
 </html>
