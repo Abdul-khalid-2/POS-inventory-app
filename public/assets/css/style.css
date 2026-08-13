@@ -136,7 +136,7 @@ body {
   padding: 14px 14px 6px;
 }
 
-.nav-item {
+.sidebar-nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -154,10 +154,10 @@ body {
   width: 100%;
   text-align: left;
 }
-.nav-item:hover { background: var(--bg-sidebar-hover); color: #fff; }
-.nav-item.active { background: var(--bg-sidebar-active); color: var(--text-sidebar-active); box-shadow: 0 2px 8px rgba(79,70,229,.4); }
-.nav-item i { font-size: 18px; width: 20px; text-align: center; flex-shrink: 0; }
-.nav-item .badge { margin-left: auto; }
+.sidebar-nav-item:hover { background: var(--bg-sidebar-hover); color: #fff; }
+.sidebar-nav-item.active { background: var(--bg-sidebar-active); color: var(--text-sidebar-active); box-shadow: 0 2px 8px rgba(79,70,229,.4); }
+.sidebar-nav-item i { font-size: 18px; width: 20px; text-align: center; flex-shrink: 0; }
+.sidebar-nav-item .badge { margin-left: auto; }
 
 .sidebar-footer {
   padding: 14px;

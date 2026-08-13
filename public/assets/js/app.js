@@ -46,13 +46,13 @@ function renderSidebar() {
     html += `<div class="nav-section-label">${sec.section}</div>`;
     sec.items.forEach(item => {
       const badge = item.badge ? `<span class="badge bg-danger">${item.badge}</span>` : '';
-      html += `<button class="nav-item ${item.view === currentView ? 'active' : ''}" data-nav="${item.view}">
+      html += `<button class="sidebar-nav-item ${item.view === currentView ? 'active' : ''}" data-nav="${item.view}">
         <i class="bi ${item.icon}"></i><span>${item.label}</span>${badge}
       </button>`;
     });
   });
   nav.innerHTML = html;
-  nav.querySelectorAll('.nav-item').forEach(btn => {
+  nav.querySelectorAll('.sidebar-nav-item').forEach(btn => {
     btn.addEventListener('click', () => navigateTo(btn.dataset.nav));
   });
 }
@@ -60,7 +60,7 @@ function renderSidebar() {
 function navigateTo(view) {
   if (!VIEWS[view]) { console.warn('View not found:', view); return; }
   currentView = view;
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === view));
+  document.getElementById('sidebarNav').querySelectorAll('.sidebar-nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === view));
   const content = document.getElementById('content');
   content.style.opacity = '0';
   content.style.transition = 'opacity .15s';
