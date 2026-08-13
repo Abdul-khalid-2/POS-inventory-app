@@ -63,8 +63,15 @@ items off as we complete them so it always reflects real project status.
       payments → expense_categories → expenses → cash_register_shifts).
       Not yet run against a real database — do that locally with
       `php artisan migrate`.
-- [ ] Write model classes with relationships (`Product belongsTo
-      Category`, `Sale hasMany SaleItems`, etc.)
+- [x] Write model classes with relationships (`Product belongsTo
+      Category`, `Sale hasMany SaleItems`, etc.) — 18 new models in
+      `app/Models/`, plus `User` extended with `role()`, `sales()`,
+      `purchases()`, `expenses()`, `stockMovements()`,
+      `cashRegisterShifts()`, `paymentsReceived()`. `Payment` and
+      `StockMovement` use Laravel's polymorphic relations (`morphTo`/
+      `morphMany`) matching the `payable`/`reference` morph columns
+      from the migrations. `Product::isLowStock()` helper added for
+      the dashboard's low-stock widget.
 - [ ] Seed realistic demo data (replacing `data.js` as the source of
       truth) via seeders/factories
 
