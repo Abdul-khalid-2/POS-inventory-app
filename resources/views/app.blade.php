@@ -21,6 +21,11 @@
           'name' => auth()->user()->name,
           'role' => auth()->user()->role?->name ?? 'Staff',
       ]);
+      // module => can_view, for the current user's role. Only modules
+      // in the role_permissions matrix appear here (see RoleSeeder) —
+      // a module with no entry (e.g. notifications) is open to anyone
+      // authenticated, matching routes/web.php.
+      window.__PERMISSIONS__ = @json(auth()->user()->role?->permissions->pluck('can_view', 'module') ?? []);
     </script>
 
     <div id="app">
@@ -75,8 +80,8 @@
                 <i class="bi bi-chevron-down small"></i>
               </button>
               <ul class="dropdown-menu dropdown-menu-end">
-                <li><a class="dropdown-item" href="#" data-nav="settings"><i class="bi bi-person me-2"></i>Profile</a></li>
-                <li><a class="dropdown-item" href="#" data-nav="settings"><i class="bi bi-gear me-2"></i>Settings</a></li>
+                <li><a class="dropdown-item" href="#" data-nav="settings" id="profileMenuLink"><i class="bi bi-person me-2"></i>Profile</a></li>
+                <li><a class="dropdown-item" href="#" data-nav="settings" id="settingsMenuLink"><i class="bi bi-gear me-2"></i>Settings</a></li>
                 <li><hr class="dropdown-divider" /></li>
                 <li><a class="dropdown-item text-danger" href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
               </ul>

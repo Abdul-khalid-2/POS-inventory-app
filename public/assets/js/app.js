@@ -58,10 +58,18 @@ function registerView(name, renderFn) {
 
 function renderSidebar() {
   const nav = document.getElementById('sidebarNav');
+  const perms = window.__PERMISSIONS__ || {};
+  // A module with no entry in perms isn't gated at all (e.g.
+  // notifications) — only hide items explicitly marked can_view=false.
+  const canSee = view => !(view in perms) || perms[view];
+
   let html = '';
   NAV_STRUCTURE.forEach(sec => {
+    const visibleItems = sec.items.filter(item => canSee(item.view));
+    if (visibleItems.length === 0) return;
+
     html += `<div class="nav-section-label">${sec.section}</div>`;
-    sec.items.forEach(item => {
+    visibleItems.forEach(item => {
       const badge = item.badge ? `<span class="badge bg-danger">${item.badge}</span>` : '';
       const url = ROUTES[item.view] || '#';
       html += `<a href="${url}" class="sidebar-nav-item ${item.view === currentView ? 'active' : ''}" data-nav="${item.view}">
@@ -133,6 +141,14 @@ function setUserUI() {
   document.getElementById('sidebarUserAvatar').textContent = letter;
   document.getElementById('topbarUserName').textContent = currentUser.name;
   document.getElementById('topbarAvatar').textContent = letter;
+
+  // The topbar's Profile/Settings links both point at the settings
+  // screen, same as the sidebar item — hide them too if this role
+  // can't view settings, so there's no dead-end link left dangling.
+  const perms = window.__PERMISSIONS__ || {};
+  const canSeeSettings = !('settings' in perms) || perms.settings;
+  document.getElementById('profileMenuLink')?.closest('li')?.classList.toggle('d-none', !canSeeSettings);
+  document.getElementById('settingsMenuLink')?.closest('li')?.classList.toggle('d-none', !canSeeSettings);
 }
 
 function showApp() {

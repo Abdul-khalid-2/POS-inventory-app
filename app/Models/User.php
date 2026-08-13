@@ -58,6 +58,29 @@ class User extends Authenticatable
         return $this->belongsTo(Role::class);
     }
 
+    /**
+     * Whether this user's role grants a given ability on a module —
+     * e.g. hasModulePermission('purchases', 'edit'). Named to avoid
+     * colliding with Authorizable::can(), which this class already
+     * inherits for Gate/Policy checks.
+     */
+    public function hasModulePermission(string $module, string $ability = 'view'): bool
+    {
+        $permission = $this->role?->permissions->firstWhere('module', $module);
+
+        if (! $permission) {
+            return false;
+        }
+
+        return match ($ability) {
+            'view' => $permission->can_view,
+            'add' => $permission->can_add,
+            'edit' => $permission->can_edit,
+            'delete' => $permission->can_delete,
+            default => false,
+        };
+    }
+
     /** Sales this user made as a cashier. */
     public function sales(): HasMany
     {

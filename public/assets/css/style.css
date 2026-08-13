@@ -484,6 +484,9 @@ body {
   display: flex; align-items: center; justify-content: center; color: #fff; font-size: 28px;
   margin: 0 auto 20px;
 }
+.login-logo.login-logo-danger {
+  background: linear-gradient(135deg, var(--danger-500, #ef4444), var(--danger-700, #b91c1c));
+}
 
 /* ===== Responsive ===== */
 @media (max-width: 991.98px) {

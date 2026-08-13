@@ -107,8 +107,28 @@ items off as we complete them so it always reflects real project status.
       (`database/migrations/2025_01_15_000001..000003`), `User::role()`
       relationship, all four roles seeded by `RoleSeeder` and assigned
       to the 5 staff accounts in `UserSeeder`. No new work needed here.
-- [ ] Role & permissions matrix (per module: view/add/edit/delete)
-- [ ] Route middleware to protect screens by role
+- [x] Role & permissions matrix (per module: view/add/edit/delete) —
+      the `role_permissions` table + data already existed from Phase 1
+      (`RoleSeeder`); what was missing was actually *using* it. Added
+      `User::hasModulePermission($module, $ability = 'view')` — named
+      to avoid colliding with Laravel's built-in `Authorizable::can()`,
+      which `User` already inherits.
+- [x] Route middleware to protect screens by role —
+      `app/Http/Middleware/EnsureModulePermission.php`, aliased as
+      `module` in `bootstrap/app.php`. Applied as `->middleware('module:sales')`
+      etc. to the 10 screens that have matrix entries (Orders and
+      Notifications don't — see the comment in `routes/web.php`; Orders
+      is slated for removal anyway, Notifications is intentionally
+      open to any authenticated user). Unauthorized access gets a
+      real on-brand 403 page (`resources/views/errors/403.blade.php`),
+      not Laravel's default error screen. Sidebar nav and the topbar's
+      Profile/Settings links now also hide items the current role
+      can't view (`window.__PERMISSIONS__` in `app.blade.php`,
+      filtering in `app.js`) — so nothing links to a screen that would
+      just 403 on click. Try it locally: log in as `cashier@novapos.com`
+      (password `demo1234`) — Inventory, Accounts, Reports, and
+      Settings should be missing from the sidebar and 403 if visited
+      directly.
 - [x] Real logout — done as part of the auth work above (real
       CSRF-protected POST to `/logout`, session invalidated).
 - [ ] Password reset ("Forgot password?" flow) — still a placeholder

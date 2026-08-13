@@ -40,25 +40,31 @@ Route::middleware('guest')->group(function () {
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth')->name('logout');
 
 Route::middleware('auth')->group(function () {
-    Route::get('/', DashboardController::class . '@index')->name('dashboard');
+    Route::get('/', DashboardController::class . '@index')->name('dashboard')->middleware('module:dashboard');
 
-    Route::get('/pos', PosController::class . '@index')->name('pos');
+    Route::get('/pos', PosController::class . '@index')->name('pos')->middleware('module:pos');
 
-    Route::get('/products', ProductController::class . '@index')->name('products');
-    Route::get('/inventory', InventoryController::class . '@index')->name('inventory');
+    Route::get('/products', ProductController::class . '@index')->name('products')->middleware('module:products');
+    Route::get('/inventory', InventoryController::class . '@index')->name('inventory')->middleware('module:inventory');
 
-    Route::get('/sales', SaleController::class . '@index')->name('sales');
+    Route::get('/sales', SaleController::class . '@index')->name('sales')->middleware('module:sales');
+    // Orders isn't in the role_permissions matrix (see RoleSeeder) —
+    // it's slated for removal in Phase 13, so it's left open to any
+    // authenticated user rather than inventing permissions for a
+    // screen that's going away.
     Route::get('/orders', OrderController::class . '@index')->name('orders');
 
-    Route::get('/purchases', PurchaseController::class . '@index')->name('purchases');
+    Route::get('/purchases', PurchaseController::class . '@index')->name('purchases')->middleware('module:purchases');
 
     // Customers, Suppliers, Staff & Roles all live under one screen with
     // in-page tabs (see public/assets/js/views/people.js).
-    Route::get('/people', PeopleController::class . '@index')->name('people');
+    Route::get('/people', PeopleController::class . '@index')->name('people')->middleware('module:people');
 
-    Route::get('/accounts', AccountController::class . '@index')->name('accounts');
-    Route::get('/reports', ReportController::class . '@index')->name('reports');
+    Route::get('/accounts', AccountController::class . '@index')->name('accounts')->middleware('module:accounts');
+    Route::get('/reports', ReportController::class . '@index')->name('reports')->middleware('module:reports');
 
-    Route::get('/settings', SettingController::class . '@index')->name('settings');
+    Route::get('/settings', SettingController::class . '@index')->name('settings')->middleware('module:settings');
+    // Notifications also has no matrix entry — every authenticated
+    // user gets their own notifications regardless of role.
     Route::get('/notifications', NotificationController::class . '@index')->name('notifications');
 });
