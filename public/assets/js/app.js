@@ -2,6 +2,23 @@
    NovaPOS — App Shell & Router
    =========================== */
 
+// Maps each screen's `view` key to its real Laravel route. Keep this in
+// sync with routes/web.php — every key here has a matching named route.
+const ROUTES = {
+  dashboard: '/',
+  pos: '/pos',
+  products: '/products',
+  inventory: '/inventory',
+  sales: '/sales',
+  orders: '/orders',
+  purchases: '/purchases',
+  people: '/people',
+  accounts: '/accounts',
+  reports: '/reports',
+  settings: '/settings',
+  notifications: '/notifications',
+};
+
 const NAV_STRUCTURE = [
   { section: 'Main', items: [
     { view: 'dashboard', label: 'Dashboard', icon: 'bi-speedometer2' },
@@ -33,7 +50,8 @@ const NAV_STRUCTURE = [
 
 const VIEWS = {};
 let currentUser = null;
-let currentView = 'dashboard';
+let currentView = window.__INITIAL_VIEW__ || 'dashboard';
+const AUTH_STORAGE_KEY = 'novapos_user';
 
 function registerView(name, renderFn) {
   VIEWS[name] = renderFn;
@@ -46,30 +64,32 @@ function renderSidebar() {
     html += `<div class="nav-section-label">${sec.section}</div>`;
     sec.items.forEach(item => {
       const badge = item.badge ? `<span class="badge bg-danger">${item.badge}</span>` : '';
-      html += `<button class="sidebar-nav-item ${item.view === currentView ? 'active' : ''}" data-nav="${item.view}">
+      const url = ROUTES[item.view] || '#';
+      html += `<a href="${url}" class="sidebar-nav-item ${item.view === currentView ? 'active' : ''}" data-nav="${item.view}">
         <i class="bi ${item.icon}"></i><span>${item.label}</span>${badge}
-      </button>`;
+      </a>`;
     });
   });
   nav.innerHTML = html;
-  nav.querySelectorAll('.sidebar-nav-item').forEach(btn => {
-    btn.addEventListener('click', () => navigateTo(btn.dataset.nav));
-  });
 }
 
+// Navigates by changing the browser URL to the screen's real route
+// (a normal page load, handled server-side by the matching controller).
 function navigateTo(view) {
-  if (!VIEWS[view]) { console.warn('View not found:', view); return; }
-  currentView = view;
-  document.getElementById('sidebarNav').querySelectorAll('.sidebar-nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === view));
+  const url = ROUTES[view];
+  if (!url) { console.warn('No route registered for view:', view); return; }
+  window.location.href = url;
+}
+
+// Renders the screen for the CURRENT page (no navigation — used once per
+// page load, since each route now server-renders its own page).
+function renderCurrentView() {
+  if (!VIEWS[currentView]) { console.warn('View not found:', currentView); return; }
+  document.getElementById('sidebarNav').querySelectorAll('.sidebar-nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === currentView));
   const content = document.getElementById('content');
-  content.style.opacity = '0';
-  content.style.transition = 'opacity .15s';
-  setTimeout(() => {
-    content.innerHTML = '';
-    VIEWS[view]();
-    content.style.opacity = '1';
-    if (window.innerWidth < 992) closeSidebar();
-  }, 100);
+  content.innerHTML = '';
+  VIEWS[currentView]();
+  if (window.innerWidth < 992) closeSidebar();
 }
 
 function closeSidebar() {
@@ -116,19 +136,25 @@ function setUserUI() {
   document.getElementById('topbarAvatar').textContent = letter;
 }
 
+function showApp() {
+  document.getElementById('login-view').classList.add('d-none');
+  document.getElementById('app').classList.remove('d-none');
+  setUserUI();
+  renderSidebar();
+  renderNotifDropdown();
+  renderCurrentView();
+}
+
 function login(email, role) {
   const user = USERS.find(u => u.role === role) || USERS[0];
   currentUser = { ...user, email };
-  setUserUI();
-  document.getElementById('login-view').classList.add('d-none');
-  document.getElementById('app').classList.remove('d-none');
-  renderSidebar();
-  renderNotifDropdown();
-  navigateTo(window.__INITIAL_VIEW__ || 'dashboard');
+  try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) { /* storage unavailable, demo still works for this page load */ }
+  showApp();
 }
 
 function logout() {
   currentUser = null;
+  try { sessionStorage.removeItem(AUTH_STORAGE_KEY); } catch (e) { /* ignore */ }
   document.getElementById('app').classList.add('d-none');
   document.getElementById('login-view').classList.remove('d-none');
   VIEWS.login();
@@ -154,6 +180,18 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-nav]').forEach(el => {
     el.addEventListener('click', e => { e.preventDefault(); navigateTo(el.dataset.nav); });
   });
-  // Start with login
-  VIEWS.login();
+
+  // Every screen is now its own real route, so a saved (demo) login
+  // needs to survive a full page navigation — restore it here instead
+  // of always starting over at the login screen.
+  let savedUser = null;
+  try { savedUser = JSON.parse(sessionStorage.getItem(AUTH_STORAGE_KEY) || 'null'); } catch (e) { /* ignore */ }
+
+  if (savedUser) {
+    currentUser = savedUser;
+    showApp();
+  } else {
+    VIEWS.login();
+  }
 });
+
