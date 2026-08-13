@@ -102,10 +102,17 @@ items off as we complete them so it always reflects real project status.
       client-side state clearing. Try it locally: any seeded user +
       password `demo1234` (Tom Cashier is seeded inactive — good test
       case for the deactivated-account rejection).
-- [ ] `users` table with roles: Admin, Cashier, Accountant, Manager
+- [x] `users` table with roles: Admin, Cashier, Accountant, Manager —
+      already in place from Phase 1: `roles` table + `users.role_id` FK
+      (`database/migrations/2025_01_15_000001..000003`), `User::role()`
+      relationship, all four roles seeded by `RoleSeeder` and assigned
+      to the 5 staff accounts in `UserSeeder`. No new work needed here.
 - [ ] Role & permissions matrix (per module: view/add/edit/delete)
 - [ ] Route middleware to protect screens by role
-- [ ] Real logout, password reset
+- [x] Real logout — done as part of the auth work above (real
+      CSRF-protected POST to `/logout`, session invalidated).
+- [ ] Password reset ("Forgot password?" flow) — still a placeholder
+      link on the login page; needs mail sending configured first.
 
 ### Phase 3 — Products, Categories, Brands, Units
 - [ ] CRUD endpoints/controllers backed by the database
