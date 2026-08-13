@@ -49,11 +49,12 @@ items off as we complete them so it always reflects real project status.
       placeholders)
 
 ### Phase 1 — Database Schema
-- [ ] Design ERD: products, categories, brands, units, customers,
+- [x] Design ERD: products, categories, brands, units, customers,
       suppliers, staff/users, roles & permissions, sales, sale_items,
       purchases, purchase_items, orders, order_items, expenses,
       expense_categories, stock_movements, cash_register_shifts,
-      payments, taxes
+      payments, taxes — see [`docs/erd.md`](docs/erd.md). A few design
+      decisions in there need your sign-off before migrations are written.
 - [ ] Write migrations for all tables above
 - [ ] Write model classes with relationships (`Product belongsTo
       Category`, `Sale hasMany SaleItems`, etc.)
