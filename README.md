@@ -89,7 +89,19 @@ items off as we complete them so it always reflects real project status.
       with `php artisan migrate --seed`.
 
 ### Phase 2 — Real Authentication & Roles
-- [ ] Replace the mock login gate with real Laravel auth (session-based)
+- [x] Replace the mock login gate with real Laravel auth (session-based)
+      — `app/Http/Controllers/Auth/AuthController.php` handles login
+      (`Auth::attempt`, remember-me, inactive-account check) and logout
+      (session invalidation + token regeneration). `resources/views/auth/login.blade.php`
+      is a real server-rendered page (same visual design as the old
+      mock login card). All 12 screen routes now sit behind `auth`
+      middleware in `routes/web.php`; `/login` sits behind `guest`.
+      The Blade shell no longer has a client-side login gate —
+      `window.__CURRENT_USER__` is now the real authenticated user,
+      injected server-side. Logout is a real CSRF-protected POST, not
+      client-side state clearing. Try it locally: any seeded user +
+      password `demo1234` (Tom Cashier is seeded inactive — good test
+      case for the deactivated-account rejection).
 - [ ] `users` table with roles: Admin, Cashier, Accountant, Manager
 - [ ] Role & permissions matrix (per module: view/add/edit/delete)
 - [ ] Route middleware to protect screens by role

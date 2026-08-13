@@ -51,7 +51,6 @@ const NAV_STRUCTURE = [
 const VIEWS = {};
 let currentUser = null;
 let currentView = window.__INITIAL_VIEW__ || 'dashboard';
-const AUTH_STORAGE_KEY = 'novapos_user';
 
 function registerView(name, renderFn) {
   VIEWS[name] = renderFn;
@@ -137,27 +136,16 @@ function setUserUI() {
 }
 
 function showApp() {
-  document.getElementById('login-view').classList.add('d-none');
-  document.getElementById('app').classList.remove('d-none');
   setUserUI();
   renderSidebar();
   renderNotifDropdown();
   renderCurrentView();
 }
 
-function login(email, role) {
-  const user = USERS.find(u => u.role === role) || USERS[0];
-  currentUser = { ...user, email };
-  try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser)); } catch (e) { /* storage unavailable, demo still works for this page load */ }
-  showApp();
-}
-
+// Real logout — submits the CSRF-protected form in the Blade shell
+// rather than clearing client-side state. See routes/web.php POST /logout.
 function logout() {
-  currentUser = null;
-  try { sessionStorage.removeItem(AUTH_STORAGE_KEY); } catch (e) { /* ignore */ }
-  document.getElementById('app').classList.add('d-none');
-  document.getElementById('login-view').classList.remove('d-none');
-  VIEWS.login();
+  document.getElementById('logoutForm')?.submit();
 }
 
 // Theme toggle
@@ -176,22 +164,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('sidebarOverlay')?.addEventListener('click', closeSidebar);
   document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
   document.getElementById('logoutBtn')?.addEventListener('click', e => { e.preventDefault(); logout(); });
-  document.getElementById('switchUserBtn')?.addEventListener('click', e => { e.preventDefault(); logout(); });
   document.querySelectorAll('[data-nav]').forEach(el => {
     el.addEventListener('click', e => { e.preventDefault(); navigateTo(el.dataset.nav); });
   });
 
-  // Every screen is now its own real route, so a saved (demo) login
-  // needs to survive a full page navigation — restore it here instead
-  // of always starting over at the login screen.
-  let savedUser = null;
-  try { savedUser = JSON.parse(sessionStorage.getItem(AUTH_STORAGE_KEY) || 'null'); } catch (e) { /* ignore */ }
-
-  if (savedUser) {
-    currentUser = savedUser;
-    showApp();
-  } else {
-    VIEWS.login();
-  }
+  // Every route is now protected by real Laravel session auth (see
+  // routes/web.php) — reaching this page at all means you're logged
+  // in, so the real user comes straight from the server via
+  // window.__CURRENT_USER__ (set in app.blade.php). No client-side
+  // login gate or session-storage restore needed anymore.
+  currentUser = window.__CURRENT_USER__ || null;
+  showApp();
 });
-

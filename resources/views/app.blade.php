@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="csrf-token" content="{{ csrf_token() }}" />
     <title>{{ $title ?? 'NovaPOS — Point of Sale & Inventory' }}</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234f46e5'/><text x='50' y='66' font-size='52' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'>N</text></svg>" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
@@ -11,11 +12,18 @@
     <link rel="stylesheet" href="{{ asset('assets/css/style.css') }}" />
   </head>
   <body>
-    {{-- The initial view requested via the Laravel route. app.js reads this on first login. --}}
-    <script>window.__INITIAL_VIEW__ = @json($view ?? 'dashboard');</script>
+    {{-- The route you're on (each screen's own initial view) and the
+    real authenticated user, straight from the session — no more
+    client-side login gate or mock user object. --}}
+    <script>
+      window.__INITIAL_VIEW__ = @json($view ?? 'dashboard');
+      window.__CURRENT_USER__ = @json([
+          'name' => auth()->user()->name,
+          'role' => auth()->user()->role?->name ?? 'Staff',
+      ]);
+    </script>
 
-    <div id="login-view"></div>
-    <div id="app" class="d-none">
+    <div id="app">
       <button class="btn btn-primary d-lg-none sidebar-toggle-btn" id="sidebarToggle" type="button" aria-label="Toggle menu">
         <i class="bi bi-list"></i>
       </button>
@@ -70,7 +78,6 @@
                 <li><a class="dropdown-item" href="#" data-nav="settings"><i class="bi bi-person me-2"></i>Profile</a></li>
                 <li><a class="dropdown-item" href="#" data-nav="settings"><i class="bi bi-gear me-2"></i>Settings</a></li>
                 <li><hr class="dropdown-divider" /></li>
-                <li><a class="dropdown-item" href="#" id="switchUserBtn"><i class="bi bi-arrow-left-right me-2"></i>Switch User</a></li>
                 <li><a class="dropdown-item text-danger" href="#" id="logoutBtn"><i class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
               </ul>
             </div>
@@ -82,12 +89,16 @@
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
     <div id="modalRoot"></div>
 
+    {{-- Real logout — POST with CSRF, not client-side state clearing. --}}
+    <form id="logoutForm" method="POST" action="{{ route('logout') }}" class="d-none">
+      @csrf
+    </form>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="{{ asset('assets/js/data.js') }}"></script>
     <script src="{{ asset('assets/js/helpers.js') }}"></script>
     <script src="{{ asset('assets/js/app.js') }}"></script>
-    <script src="{{ asset('assets/js/views/login.js') }}"></script>
     <script src="{{ asset('assets/js/views/dashboard.js') }}"></script>
     <script src="{{ asset('assets/js/views/pos.js') }}"></script>
     <script src="{{ asset('assets/js/views/products.js') }}"></script>
