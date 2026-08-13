@@ -1,59 +1,167 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# NovaPOS — POS & Inventory Management System
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Laravel-based Point of Sale and Inventory Management system for small
+businesses: dashboard, POS terminal, products, inventory, sales, orders,
+purchases, customers/suppliers/staff, accounts (profit & loss), reports,
+settings, and notifications.
 
-## About Laravel
+This README is the **build roadmap** — every phase we'll work through, in
+order, to take this from a wired-up UI shell to a fully working app. Check
+items off as we complete them so it always reflects real project status.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Tech Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Backend:** Laravel (PHP)
+- **Frontend:** Plain HTML/CSS/JS + Bootstrap 5 (no React/Vue, no npm build
+  step for the app UI itself — see `public/assets/`)
+- **Charts:** Chart.js (CDN)
+- **Icons:** Bootstrap Icons (CDN)
 
-## Learning Laravel
+## Current Architecture (as of now)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+- `resources/views/app.blade.php` — single Blade shell shared by every
+  screen. Each route passes in an initial `view` key.
+- `app/Http/Controllers/*Controller.php` — one controller per screen,
+  each just renders the shell with its `view` key. No business logic yet.
+- `routes/web.php` — one named route per screen (real URLs, not just
+  in-page JS navigation).
+- `public/assets/js/views/*.js` — one file per screen; each registers
+  itself with `registerView()` and renders its own HTML/behavior.
+- `public/assets/js/data.js` — **mock data only**. This is what every
+  screen currently reads from. Replacing this is Phase 1–2 below.
+- Login is a **client-side demo gate** (`public/assets/js/views/login.js`
+  + `app.js`), persisted in `sessionStorage`. Not real auth yet.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-## Laravel Sponsors
+## Roadmap
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### Phase 0 — Foundation ✅ Done
+- [x] Restructure bolt.new export into proper Laravel layout
+      (`public/assets/`, Blade shell, controllers, routes)
+- [x] Fix nav-tabs CSS collision (`.nav-item` → `.sidebar-nav-item`)
+- [x] Give every screen a real, bookmarkable Laravel route
+- [x] Persist demo login across page loads (`sessionStorage`)
+- [x] Fill in missing screens referenced by nav but never generated
+      (Orders, Accounts, Reports, Settings, Notifications — currently
+      placeholders)
 
-### Premium Partners
+### Phase 1 — Database Schema
+- [ ] Design ERD: products, categories, brands, units, customers,
+      suppliers, staff/users, roles & permissions, sales, sale_items,
+      purchases, purchase_items, orders, order_items, expenses,
+      expense_categories, stock_movements, cash_register_shifts,
+      payments, taxes
+- [ ] Write migrations for all tables above
+- [ ] Write model classes with relationships (`Product belongsTo
+      Category`, `Sale hasMany SaleItems`, etc.)
+- [ ] Seed realistic demo data (replacing `data.js` as the source of
+      truth) via seeders/factories
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+### Phase 2 — Real Authentication & Roles
+- [ ] Replace the mock login gate with real Laravel auth (session-based)
+- [ ] `users` table with roles: Admin, Cashier, Accountant, Manager
+- [ ] Role & permissions matrix (per module: view/add/edit/delete)
+- [ ] Route middleware to protect screens by role
+- [ ] Real logout, password reset
 
-## Contributing
+### Phase 3 — Products, Categories, Brands, Units
+- [ ] CRUD endpoints/controllers backed by the database
+- [ ] Image upload handling
+- [ ] Barcode/SKU generation + barcode label printing
+- [ ] Wire `products.js` to real endpoints instead of `data.js`
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### Phase 4 — Inventory / Stock
+- [ ] Stock levels per product (and per warehouse, if multi-location)
+- [ ] Stock adjustment flow (increase/decrease with reason + audit log)
+- [ ] Stock transfer between locations (if applicable)
+- [ ] Low-stock / out-of-stock triggers feeding the dashboard + notifications
 
-## Code of Conduct
+### Phase 5 — POS Terminal (core business logic)
+- [ ] Real checkout flow: cart → payment → sale record → stock deduction
+- [ ] Split payments, discounts, tax calculation
+- [ ] Held/parked orders persisted (not just in-memory)
+- [ ] Cash register / shift open-close with expected vs counted cash
+- [ ] Receipt generation (print + PDF)
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### Phase 6 — Sales & Returns
+- [ ] Sales history backed by real records
+- [ ] Sale detail view with real itemized data
+- [ ] Returns/refunds flow with restock toggle
+- [ ] Fix known regression: dashboard "recent sale" row click should
+      deep-link to `/sales?sale=ID` and auto-open that sale's detail
 
-## Security Vulnerabilities
+### Phase 7 — Purchases
+- [ ] Purchase order creation against real suppliers/products
+- [ ] Goods Received Note (partial receiving supported), auto stock update
+- [ ] Purchase returns
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### Phase 8 — People (Customers, Suppliers, Staff)
+- [ ] Real CRUD for customers, suppliers, staff
+- [ ] Customer ledger (purchase history + outstanding due)
+- [ ] Supplier ledger (purchase history + outstanding payable)
+- [ ] Make `/people` tabs deep-linkable (`/people?tab=suppliers`)
 
-## License
+### Phase 9 — Orders
+- [ ] Order lifecycle (pending → processing → ready → completed/cancelled)
+- [ ] Order status board backed by real data
+- [ ] Packing slip / invoice printing
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### Phase 10 — Accounts (Finance)
+- [ ] Real Profit & Loss calculation (revenue, COGS, gross/net profit)
+      for a selectable date range
+- [ ] Expenses CRUD + categories
+- [ ] Accounts Receivable / Payable summaries with "Record Payment"
+- [ ] Cash register shift history
+
+### Phase 11 — Reports
+- [ ] Sales report (by date/product/category/staff/customer)
+- [ ] Inventory valuation report
+- [ ] Best/worst selling products
+- [ ] Export to PDF/CSV
+
+### Phase 12 — Settings
+- [ ] Business profile (name, logo, address, currency, invoice numbering)
+- [ ] Tax rates, payment methods, units of measurement
+- [ ] Receipt/invoice template settings
+- [ ] Low-stock threshold + notification preferences
+
+### Phase 13 — Notifications
+- [ ] Real, database-backed notifications (not the current static mock list)
+- [ ] Triggers: low stock, new order, payment received, shift reminders
+- [ ] Mark as read/unread, filter by type
+
+### Phase 14 — Polish & Launch Readiness
+- [ ] Form validation on the backend for every module (matching the
+      frontend validation already in place)
+- [ ] Automated tests for core flows (checkout, stock deduction, P&L)
+- [ ] Performance pass on large product/sales lists (pagination is
+      already in the UI — wire it to real paginated queries)
+- [ ] Production `.env` setup, deployment
+
+---
+
+## Local Setup
+
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+# configure your database in .env, then:
+php artisan migrate --seed   # once Phase 1 migrations/seeders exist
+npm install && npm run dev   # only needed for Laravel's own Vite pipeline;
+                              # the POS UI itself (public/assets/) needs no build step
+php artisan serve
+```
+
+---
+
+## Working Agreement
+
+We're going phase by phase, in the order above — not jumping ahead to a
+later phase before the current one is solid. Each phase should end with
+working, testable functionality before moving to the next. Update the
+checkboxes in this file as we complete items so it stays an accurate
+source of truth for project status.
