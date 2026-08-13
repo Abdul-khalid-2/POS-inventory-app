@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -11,15 +10,32 @@ class DatabaseSeeder extends Seeder
     use WithoutModelEvents;
 
     /**
-     * Seed the application's database.
+     * Seeds the whole app with realistic demo data — mirrors what's
+     * already visible in public/assets/js/data.js, so the UI looks
+     * identical whether it's reading mock JS or the real database.
+     *
+     * Order matters: each seeder below depends on the ones before it
+     * (e.g. ProductSeeder needs categories/brands/units/taxes to exist).
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        $this->call([
+            // Master / reference data
+            RoleSeeder::class,
+            UserSeeder::class,
+            CategorySeeder::class,
+            BrandSeeder::class,
+            UnitSeeder::class,
+            TaxSeeder::class,
+            ProductSeeder::class,
+            CustomerSeeder::class,
+            SupplierSeeder::class,
+            ExpenseCategorySeeder::class,
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+            // Records that depend on the master data above
+            ExpenseSeeder::class,
+            CashRegisterShiftSeeder::class,
+            TransactionSeeder::class, // purchases, sales, stock_movements, payments
         ]);
     }
 }
