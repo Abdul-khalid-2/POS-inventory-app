@@ -113,13 +113,6 @@ Units of measurement (Pieces, Kg, Box, Liter).
 ### `purchase_items`
 | id | purchase_id (FK) | product_id (FK) | quantity | received_quantity | unit_cost | tax | line_total |
 
-### `orders`
-(Distinct from `sales` — for pickup/delivery orders awaiting fulfillment.)
-| id | order_no | customer_id (FK, nullable) | user_id (FK) | order_date | fulfillment_type enum('pickup','delivery') | status enum('pending','processing','ready','completed','cancelled') | subtotal, discount, tax_total, grand_total | notes |
-
-### `order_items`
-| id | order_id (FK) | product_id (FK) | quantity | unit_price | line_total |
-
 ### `stock_movements`
 The audit log every stock change writes to — sales, purchases,
 adjustments, transfers, returns all flow through here.
@@ -174,11 +167,6 @@ erDiagram
     SALES ||--o{ SALE_ITEMS : "contains"
     PRODUCTS ||--o{ SALE_ITEMS : "sold as"
 
-    CUSTOMERS ||--o{ ORDERS : "places"
-    USERS ||--o{ ORDERS : "handles"
-    ORDERS ||--o{ ORDER_ITEMS : "contains"
-    PRODUCTS ||--o{ ORDER_ITEMS : "ordered as"
-
     PRODUCTS ||--o{ STOCK_MOVEMENTS : "tracks"
     USERS ||--o{ STOCK_MOVEMENTS : "records"
 
@@ -194,13 +182,12 @@ erDiagram
 
 ---
 
-## Design Decisions Worth Confirming
+## Design Decisions — Confirmed
 
-1. **`orders` vs `sales`** — kept separate, matching the original UI spec
-   (Orders = pickup/delivery fulfillment queue; Sales = completed POS/store
-   transactions). If your business only ever does in-store POS sales with
-   no separate delivery/pickup queue, we can drop `orders`/`order_items`
-   entirely and simplify the sidebar. **Confirm before Phase 9.**
+1. **No separate `orders` table.** Confirmed: in-store checkout only, no
+   pickup/delivery fulfillment queue. `orders`/`order_items` are dropped
+   from the schema, and the Orders screen/route will be removed from the
+   sidebar in a later pass.
 2. **`current_stock` is a cached column**, not computed live from
    `stock_movements` on every read — better performance for the
    dashboard/product list, kept in sync whenever a movement is recorded.
@@ -208,15 +195,14 @@ erDiagram
    sales and supplier payments on purchases) rather than two separate
    tables — less duplication, same pattern either way works fine if you'd
    rather keep them split.
-4. **Multi-location/warehouse stock** is *not* in this schema yet — the
-   original UI spec mentioned it as optional. If you need multiple
-   branches/warehouses, we add a `warehouses` table and a
-   `product_id + warehouse_id` composite stock table instead of the single
-   `current_stock` column. **Confirm before Phase 1 migrations are written.**
+4. **Single location — no multi-warehouse.** Confirmed: one shop, one
+   stock count per product. No `warehouses` table; `current_stock` stays
+   a single column on `products`. If this ever changes, that's a schema
+   migration for later, not a blocker now.
 
 ---
 
 ## Next Step
 
-Once you confirm (or adjust) the points above, we turn this directly into
-migrations + Eloquent models — that's the next checklist item in Phase 1.
+This design is confirmed. Next: turn it into migrations + Eloquent models
+— that's the next checklist item in Phase 1.

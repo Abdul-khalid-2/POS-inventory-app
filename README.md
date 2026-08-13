@@ -1,7 +1,7 @@
 # NovaPOS — POS & Inventory Management System
 
 A Laravel-based Point of Sale and Inventory Management system for small
-businesses: dashboard, POS terminal, products, inventory, sales, orders,
+businesses: dashboard, POS terminal, products, inventory, sales,
 purchases, customers/suppliers/staff, accounts (profit & loss), reports,
 settings, and notifications.
 
@@ -51,11 +51,18 @@ items off as we complete them so it always reflects real project status.
 ### Phase 1 — Database Schema
 - [x] Design ERD: products, categories, brands, units, customers,
       suppliers, staff/users, roles & permissions, sales, sale_items,
-      purchases, purchase_items, orders, order_items, expenses,
-      expense_categories, stock_movements, cash_register_shifts,
-      payments, taxes — see [`docs/erd.md`](docs/erd.md). A few design
-      decisions in there need your sign-off before migrations are written.
-- [ ] Write migrations for all tables above
+      purchases, purchase_items, expenses, expense_categories,
+      stock_movements, cash_register_shifts, payments, taxes — see
+      [`docs/erd.md`](docs/erd.md). Confirmed: no separate Orders table
+      (in-store checkout only), single location (no multi-warehouse).
+- [x] Write migrations for all tables above — 19 migration files added
+      in `database/migrations/`, in FK dependency order (roles →
+      role_permissions → users staff fields → categories → brands →
+      units → taxes → customers → suppliers → products → sales →
+      sale_items → purchases → purchase_items → stock_movements →
+      payments → expense_categories → expenses → cash_register_shifts).
+      Not yet run against a real database — do that locally with
+      `php artisan migrate`.
 - [ ] Write model classes with relationships (`Product belongsTo
       Category`, `Sale hasMany SaleItems`, etc.)
 - [ ] Seed realistic demo data (replacing `data.js` as the source of
@@ -75,9 +82,8 @@ items off as we complete them so it always reflects real project status.
 - [ ] Wire `products.js` to real endpoints instead of `data.js`
 
 ### Phase 4 — Inventory / Stock
-- [ ] Stock levels per product (and per warehouse, if multi-location)
+- [ ] Stock levels per product (single location — no warehouse dimension)
 - [ ] Stock adjustment flow (increase/decrease with reason + audit log)
-- [ ] Stock transfer between locations (if applicable)
 - [ ] Low-stock / out-of-stock triggers feeding the dashboard + notifications
 
 ### Phase 5 — POS Terminal (core business logic)
@@ -105,36 +111,33 @@ items off as we complete them so it always reflects real project status.
 - [ ] Supplier ledger (purchase history + outstanding payable)
 - [ ] Make `/people` tabs deep-linkable (`/people?tab=suppliers`)
 
-### Phase 9 — Orders
-- [ ] Order lifecycle (pending → processing → ready → completed/cancelled)
-- [ ] Order status board backed by real data
-- [ ] Packing slip / invoice printing
-
-### Phase 10 — Accounts (Finance)
+### Phase 9 — Accounts (Finance)
 - [ ] Real Profit & Loss calculation (revenue, COGS, gross/net profit)
       for a selectable date range
 - [ ] Expenses CRUD + categories
 - [ ] Accounts Receivable / Payable summaries with "Record Payment"
 - [ ] Cash register shift history
 
-### Phase 11 — Reports
+### Phase 10 — Reports
 - [ ] Sales report (by date/product/category/staff/customer)
 - [ ] Inventory valuation report
 - [ ] Best/worst selling products
 - [ ] Export to PDF/CSV
 
-### Phase 12 — Settings
+### Phase 11 — Settings
 - [ ] Business profile (name, logo, address, currency, invoice numbering)
 - [ ] Tax rates, payment methods, units of measurement
 - [ ] Receipt/invoice template settings
 - [ ] Low-stock threshold + notification preferences
 
-### Phase 13 — Notifications
+### Phase 12 — Notifications
 - [ ] Real, database-backed notifications (not the current static mock list)
-- [ ] Triggers: low stock, new order, payment received, shift reminders
+- [ ] Triggers: low stock, payment received, shift reminders
 - [ ] Mark as read/unread, filter by type
 
-### Phase 14 — Polish & Launch Readiness
+### Phase 13 — Polish & Launch Readiness
+- [ ] Remove the Orders screen/route/nav item (dropped from scope —
+      in-store checkout only, see `docs/erd.md`)
 - [ ] Form validation on the backend for every module (matching the
       frontend validation already in place)
 - [ ] Automated tests for core flows (checkout, stock deduction, P&L)
