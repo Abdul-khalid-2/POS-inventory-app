@@ -191,13 +191,6 @@ async function renderProductTable() {
   attachPaginationClicks(pag, p => { productState.page = p; renderProductTable(); });
 }
 
-function productThumb(p, size = 40) {
-  if (p.image_url) {
-    return `<img src="${p.image_url}" class="product-thumb" style="width:${size}px;height:${size}px;">`;
-  }
-  return `<div class="product-thumb" style="width:${size}px;height:${size}px;"><i class="bi bi-box-seam"></i></div>`;
-}
-
 async function exportFilteredProducts() {
   let result;
   try {

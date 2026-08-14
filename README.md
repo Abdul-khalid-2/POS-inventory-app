@@ -233,7 +233,28 @@ items off as we complete them so it always reflects real project status.
         terminal's grid until that screen gets wired up too.
 
 ### Phase 4 — Inventory / Stock
-- [ ] Stock levels per product (single location — no warehouse dimension)
+- [x] Stock levels per product (single location — no warehouse
+      dimension) — the Inventory screen's **Stock Levels** and
+      **Reorder Report** tabs now run on real `/catalog/products` data
+      (reusing the same endpoint and `q`/`stock_status`/pagination
+      pattern from the Products screen — no new backend needed for
+      this, `current_stock`/`reorder_level` were already there).
+      Cleaned up two things that contradicted the single-location
+      decision confirmed back in Phase 1: removed the "All Locations"
+      warehouse filter dropdown, and removed the entire **Transfers**
+      tab (inter-warehouse transfers don't apply to a single-location
+      shop). Reorder Report now also filters to active products only —
+      a discontinued product showing up in reorder suggestions was a
+      mock-data oversight, not intentional. Moved `productThumb()`
+      into `helpers.js` since it's now shared by both the Products and
+      Inventory screens, rather than one implicitly depending on the
+      other's script load order.
+      **Deliberately left alone for now**: the Adjustments and Stock
+      History tabs, and the per-row Adjust/History buttons, still show
+      mock data or a "not wired up yet" toast — writing real stock
+      adjustments (into `stock_movements`) is the *next* checklist
+      item, not this one, and wiring the buttons against real product
+      IDs before that exists would just break them.
 - [ ] Stock adjustment flow (increase/decrease with reason + audit log)
 - [ ] Low-stock / out-of-stock triggers feeding the dashboard + notifications
 

@@ -252,3 +252,14 @@ function debounce(fn, delay) {
 function simpleLoading() {
   return '<div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
 }
+
+/**
+ * Product thumbnail — a real uploaded image if there is one, otherwise
+ * a generic icon placeholder. Shared by products.js and inventory.js.
+ */
+function productThumb(p, size = 40) {
+  if (p.image_url) {
+    return `<img src="${p.image_url}" class="product-thumb" style="width:${size}px;height:${size}px;">`;
+  }
+  return `<div class="product-thumb" style="width:${size}px;height:${size}px;"><i class="bi bi-box-seam"></i></div>`;
+}
