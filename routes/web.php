@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ProductController as ProductApiController;
+use App\Http\Controllers\Api\TaxController;
 use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\DashboardController;
@@ -93,5 +94,8 @@ Route::middleware('auth')->group(function () {
         Route::apiResource('categories', CategoryController::class);
         Route::apiResource('brands', BrandController::class);
         Route::apiResource('units', UnitController::class);
+        // Read-only — the product form needs real tax IDs to submit;
+        // full tax management is a Settings-screen feature, not built yet.
+        Route::get('taxes', [TaxController::class, 'index'])->name('taxes.index')->middleware('module:settings');
     });
 });

@@ -49,7 +49,10 @@ class ProductController extends Controller implements HasMiddleware
     /**
      * GET /catalog/products
      * Supports: q (search name/sku/barcode), category_id, brand_id,
-     * status, low_stock=1, per_page (default 20).
+     * status, stock_status (in|low|out — matches the Products screen's
+     * filter dropdown), low_stock=1 (legacy alias for stock_status=low,
+     * kept for anything else that links here with just a boolean flag),
+     * per_page (default 20).
      */
     public function index(Request $request): JsonResponse
     {
@@ -75,7 +78,14 @@ class ProductController extends Controller implements HasMiddleware
             $query->where('status', $request->string('status'));
         }
 
-        if ($request->boolean('low_stock')) {
+        if ($request->filled('stock_status')) {
+            match ($request->string('stock_status')->value()) {
+                'in' => $query->whereColumn('current_stock', '>', 'reorder_level'),
+                'low' => $query->where('current_stock', '>', 0)->whereColumn('current_stock', '<=', 'reorder_level'),
+                'out' => $query->where('current_stock', '<=', 0),
+                default => null,
+            };
+        } elseif ($request->boolean('low_stock')) {
             $query->whereColumn('current_stock', '<=', 'reorder_level');
         }
 

@@ -195,3 +195,60 @@ function attachPaginationClicks(container, onPageChange) {
     });
   });
 }
+
+/**
+ * Fetch wrapper for the /catalog/* JSON endpoints (see routes/web.php).
+ * Attaches the CSRF token (from the <meta> tag in app.blade.php) on
+ * any state-changing request, sends/parses JSON automatically unless
+ * the body is FormData (file uploads), and throws an Error carrying
+ * .status and .errors (Laravel's 422 validation shape) on failure so
+ * callers can show field-level messages.
+ */
+async function apiFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const isFormData = options.body instanceof FormData;
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+
+  const headers = { Accept: 'application/json', ...(options.headers || {}) };
+  if (!isFormData && options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (csrfToken && method !== 'GET') {
+    headers['X-CSRF-TOKEN'] = csrfToken;
+  }
+
+  const body = !isFormData && options.body && typeof options.body !== 'string'
+    ? JSON.stringify(options.body)
+    : options.body;
+
+  const res = await fetch(url, { ...options, method, headers, body, credentials: 'same-origin' });
+
+  let payload = null;
+  try { payload = await res.json(); } catch (e) { /* empty body, e.g. 204 */ }
+
+  if (!res.ok) {
+    const error = new Error(payload?.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    error.errors = payload?.errors || null;
+    throw error;
+  }
+
+  return payload;
+}
+
+function debounce(fn, delay) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+/**
+ * A loading placeholder safe to drop into any plain container
+ * (unlike skeletonRows(), which generates <tr>/<td> markup and only
+ * belongs inside a <tbody>).
+ */
+function simpleLoading() {
+  return '<div class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>';
+}

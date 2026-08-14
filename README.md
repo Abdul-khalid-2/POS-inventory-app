@@ -186,7 +186,51 @@ items off as we complete them so it always reflects real project status.
         barcodes client-side via JsBarcode (falls back to Code128 for
         any non-EAN-13-length barcode), grid layout sized for label
         sheets, `@media print` styling, one-click print button.
-- [ ] Wire `products.js` to real endpoints instead of `data.js`
+- [x] Wire `products.js` to real endpoints instead of `data.js` —
+      the Products screen (all three tabs: Products, Categories,
+      Brands) now runs entirely on the `/catalog/*` endpoints from the
+      steps above, not the mock arrays. What changed to make this work:
+      - Added a shared `apiFetch()` helper (`public/assets/js/helpers.js`)
+        — attaches the CSRF token from `app.blade.php`'s `<meta>` tag on
+        writes, handles both JSON and `FormData` bodies, throws with
+        `.status`/`.errors` on failure (Laravel's 422 shape) so the UI
+        can show real validation messages instead of a generic error.
+        This is meant to be reused as later screens get wired up too.
+      - Filtering, search, and pagination are now server-side. The
+        stock-status filter (`in`/`low`/`out`) needed a small
+        `ProductController::index` extension to match the UI's exact
+        semantics rather than settling for the cruder `low_stock=1`
+        flag alone.
+      - Added a minimal read-only `GET /catalog/taxes` endpoint
+        (`TaxController`) — the product form needs real tax *IDs* to
+        submit, and the mock `TAX_RATES` array had none. Full tax-rate
+        management stays a Settings-screen feature, not built yet.
+      - SKU/barcode "generate" buttons in the product form now call the
+        real generators from the previous step instead of
+        `Math.random()`. The barcode preview modal's "Print Label"
+        button now opens the real `/products/labels` print page
+        instead of the old fake-SVG placeholder.
+      - Image upload is wired end-to-end: pick a file, preview it
+        locally, and it uploads to the real endpoint right after the
+        product itself saves (a brand-new product doesn't have an ID
+        to attach an image to until it exists).
+      - Caught and fixed one bug before it shipped: `skeletonRows()`
+        generates `<tr>/<td>` markup and only belongs inside a
+        `<tbody>` — I'd first used it for two plain-`<div>` loading
+        states (Categories/Brands tabs), which would've rendered
+        invalid HTML. Added a proper `simpleLoading()` helper for
+        those instead.
+      - Deliberately left out: the Supplier dropdown on the product
+        form. Suppliers aren't wired to real data until Phase 8, and a
+        dropdown backed by mock supplier IDs would fail the backend's
+        `exists:suppliers,id` validation — better to drop it now than
+        ship something that looks functional but always errors.
+      - **Known temporary inconsistency, not hidden**: Dashboard, POS,
+        Sales, Purchases, and Inventory still read the static
+        `PRODUCTS` mock (their own turn hasn't come up yet in the
+        roadmap). A product added through the new Products screen goes
+        into the real database but won't show up in, say, the POS
+        terminal's grid until that screen gets wired up too.
 
 ### Phase 4 — Inventory / Stock
 - [ ] Stock levels per product (single location — no warehouse dimension)
