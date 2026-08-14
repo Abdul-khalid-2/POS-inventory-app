@@ -13,6 +13,7 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PeopleController;
 use App\Http\Controllers\PosController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\ProductLabelController;
 use App\Http\Controllers\PurchaseController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SaleController;
@@ -49,6 +50,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/pos', PosController::class . '@index')->name('pos')->middleware('module:pos');
 
     Route::get('/products', ProductController::class . '@index')->name('products')->middleware('module:products');
+    // Print-ready barcode labels — a real server-rendered page, not
+    // part of the products.js SPA screen. GET /products/labels?ids=1,2,3
+    Route::get('/products/labels', [ProductLabelController::class, 'show'])->name('products.labels');
     Route::get('/inventory', InventoryController::class . '@index')->name('inventory')->middleware('module:inventory');
 
     Route::get('/sales', SaleController::class . '@index')->name('sales')->middleware('module:sales');
@@ -77,6 +81,12 @@ Route::middleware('auth')->group(function () {
     // Each controller gates its own actions per-ability via
     // HasMiddleware, so no extra middleware is applied here.
     Route::prefix('catalog')->name('catalog.')->group(function () {
+        // Must come before apiResource('products', ...) — otherwise
+        // GET /catalog/products/{product} would swallow these as if
+        // "generate-sku"/"generate-barcode" were a product ID.
+        Route::get('products/generate-sku', [ProductApiController::class, 'generateSku'])->name('products.generate-sku');
+        Route::get('products/generate-barcode', [ProductApiController::class, 'generateBarcode'])->name('products.generate-barcode');
+
         Route::apiResource('products', ProductApiController::class);
         Route::post('products/{product}/image', [ProductApiController::class, 'uploadImage'])->name('products.image.upload');
         Route::delete('products/{product}/image', [ProductApiController::class, 'deleteImage'])->name('products.image.delete');

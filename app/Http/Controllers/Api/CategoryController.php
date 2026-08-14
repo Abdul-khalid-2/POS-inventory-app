@@ -78,6 +78,7 @@ class CategoryController extends Controller implements HasMiddleware
     {
         $rules = [
             'name' => ['required', 'string', 'max:100'],
+            'sku_prefix' => ['nullable', 'string', 'max:5'],
             'parent_id' => ['nullable', 'exists:categories,id'],
             'status' => ['required', Rule::in(['active', 'inactive'])],
         ];
@@ -87,7 +88,13 @@ class CategoryController extends Controller implements HasMiddleware
             $rules['parent_id'][] = Rule::notIn([$category->id]);
         }
 
-        return $request->validate($rules);
+        $data = $request->validate($rules);
+
+        if (! empty($data['sku_prefix'])) {
+            $data['sku_prefix'] = strtoupper($data['sku_prefix']);
+        }
+
+        return $data;
     }
 
     private function uniqueSlug(string $name, ?Category $ignore = null): string

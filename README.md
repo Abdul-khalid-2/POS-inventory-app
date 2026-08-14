@@ -165,7 +165,27 @@ items off as we complete them so it always reflects real project status.
       `ProductResource` now returns both the raw `image` path and a
       ready-to-use `image_url`. One-time local setup needed:
       `php artisan storage:link`.
-- [ ] Barcode/SKU generation + barcode label printing
+- [x] Barcode/SKU generation + barcode label printing —
+      `app/Services/ProductCodeGenerator.php` handles both:
+      - **SKU**: `GET /catalog/products/generate-sku?category_id=` —
+        prefix comes from the new `categories.sku_prefix` column
+        (migration `2025_01_20_000001`, backfilled to match the
+        prefixes already baked into `ProductSeeder`'s SKUs — BEV, SNK,
+        DRY, etc. — falls back to the category name's first 3 letters
+        if unset), then the next sequence number for that prefix.
+      - **Barcode**: `GET /catalog/products/generate-barcode` — a real
+        EAN-13 with a correct check digit (verified against known-good
+        real-world EAN-13s, not just internally consistent), using the
+        20–29 prefix range conventionally reserved for in-store/
+        internal use so generated codes never collide with a genuine
+        manufacturer barcode. Retries on the rare DB collision.
+      - **Label printing**: `GET /products/labels?ids=1,2,3` — a real
+        print-ready page (`ProductLabelController` +
+        `resources/views/products/labels.blade.php`), independent of
+        the products.js SPA screen entirely. Renders scannable
+        barcodes client-side via JsBarcode (falls back to Code128 for
+        any non-EAN-13-length barcode), grid layout sized for label
+        sheets, `@media print` styling, one-click print button.
 - [ ] Wire `products.js` to real endpoints instead of `data.js`
 
 ### Phase 4 — Inventory / Stock

@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
+use App\Models\Category;
 use App\Models\Product;
+use App\Services\ProductCodeGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -18,10 +20,30 @@ class ProductController extends Controller implements HasMiddleware
     {
         return [
             new Middleware('module:products', only: ['index', 'show']),
-            new Middleware('module:products,add', only: ['store']),
+            new Middleware('module:products,add', only: ['store', 'generateSku', 'generateBarcode']),
             new Middleware('module:products,edit', only: ['update', 'uploadImage', 'deleteImage']),
             new Middleware('module:products,delete', only: ['destroy']),
         ];
+    }
+
+    /**
+     * GET /catalog/products/generate-sku?category_id=
+     */
+    public function generateSku(Request $request): JsonResponse
+    {
+        $request->validate(['category_id' => ['required', 'exists:categories,id']]);
+
+        $category = Category::findOrFail($request->integer('category_id'));
+
+        return response()->json(['sku' => ProductCodeGenerator::nextSku($category)]);
+    }
+
+    /**
+     * GET /catalog/products/generate-barcode
+     */
+    public function generateBarcode(): JsonResponse
+    {
+        return response()->json(['barcode' => ProductCodeGenerator::nextBarcode()]);
     }
 
     /**
