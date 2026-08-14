@@ -66,7 +66,7 @@ function renderStockLevels(c) {
     </div>`;
   document.getElementById('invSearch').addEventListener('input', debounce(e => { invState.search = e.target.value; invState.page = 1; renderInvTable(); }, 350));
   document.getElementById('invStock').addEventListener('change', e => { invState.stockStatus = e.target.value; invState.page = 1; renderInvTable(); });
-  document.getElementById('invAdjust').addEventListener('click', () => showToast('Stock adjustments are wired up in the next step — this button isn\'t connected yet.', 'info'));
+  document.getElementById('invAdjust').addEventListener('click', () => adjustmentModal());
   document.getElementById('invExport').addEventListener('click', exportStockLevels);
   renderInvTable();
 }
@@ -106,10 +106,16 @@ async function renderInvTable() {
         <td class="fw-600">${p.current_stock} ${p.unit.short_code}</td><td>${p.reorder_level} ${p.unit.short_code}</td>
         <td class="text-money">${fmtMoney(p.cost_price * p.current_stock)}</td>
         <td>${stockBadge(p.current_stock, p.reorder_level)}</td>
-        <td class="text-end"><div class="table-actions"><button class="icon-btn" data-inv-adjust title="Adjust — not wired up yet"><i class="bi bi-arrow-down-up"></i></button><button class="icon-btn" data-inv-history title="History — not wired up yet"><i class="bi bi-clock-history"></i></button></div></td>
+        <td class="text-end"><div class="table-actions"><button class="icon-btn" data-inv-adjust="${p.id}" title="Adjust"><i class="bi bi-arrow-down-up"></i></button><button class="icon-btn" data-inv-history="${p.id}" title="History"><i class="bi bi-clock-history"></i></button></div></td>
       </tr>`).join('');
-    body.querySelectorAll('[data-inv-adjust], [data-inv-history]').forEach(b => b.addEventListener('click', () =>
-      showToast('This is wired up in the next roadmap step.', 'info')));
+    body.querySelectorAll('[data-inv-adjust]').forEach(b => b.addEventListener('click', () => {
+      const p = items.find(x => String(x.id) === b.dataset.invAdjust);
+      adjustmentModal(p);
+    }));
+    body.querySelectorAll('[data-inv-history]').forEach(b => b.addEventListener('click', () => {
+      const p = items.find(x => String(x.id) === b.dataset.invHistory);
+      showStockHistory(p);
+    }));
   }
 
   // Cost value across every matching product (not just this page) —
@@ -142,36 +148,63 @@ async function exportStockLevels() {
 }
 
 
-function adjustmentModal(productId) {
-  const p = productId ? productById(productId) : null;
+async function adjustmentModal(preselected) {
+  let products = preselected ? [preselected] : null;
+  if (!products) {
+    try {
+      const result = await apiFetch('/catalog/products?status=active&per_page=1000');
+      products = result.data;
+    } catch (e) {
+      showToast("Couldn't load products: " + e.message, 'error');
+      return;
+    }
+  }
+
   const body = `
     <form id="adjForm">
-      <div class="mb-3"><label class="form-label">Product *</label><select class="form-select" id="adjProduct" ${p?'disabled':''}>
-        ${PRODUCTS.map(pr => `<option value="${pr.id}" ${p?.id===pr.id?'selected':''}>${pr.name} (${pr.stock} ${pr.unit})</option>`).join('')}
+      <div class="mb-3"><label class="form-label">Product *</label><select class="form-select" id="adjProduct" ${preselected ? 'disabled' : ''}>
+        ${products.map(pr => `<option value="${pr.id}" ${preselected?.id === pr.id ? 'selected' : ''}>${pr.name} (${pr.current_stock} ${pr.unit.short_code})</option>`).join('')}
       </select></div>
       <div class="row g-3 mb-3">
         <div class="col-6"><label class="form-label">Adjustment Type</label><select class="form-select" id="adjType"><option value="increase">Increase (+)</option><option value="decrease">Decrease (−)</option></select></div>
         <div class="col-6"><label class="form-label">Quantity *</label><input type="number" class="form-control" id="adjQty" min="1" value="1" required></div>
       </div>
       <div class="mb-3"><label class="form-label">Reason *</label><select class="form-select" id="adjReason"><option>Damaged</option><option>Returned</option><option>Correction</option><option>Lost</option><option>Found</option><option>Other</option></select></div>
-      <div class="row g-3 mb-3">
-        <div class="col-6"><label class="form-label">Reference #</label><input type="text" class="form-control" id="adjRef" value="ADJ-${Math.floor(100+Math.random()*900)}"></div>
-        <div class="col-6"><label class="form-label">Date</label><input type="date" class="form-control" id="adjDate" value="${new Date().toISOString().slice(0,10)}"></div>
-      </div>
       <div class="mb-3"><label class="form-label">Notes</label><textarea class="form-control" id="adjNotes" rows="2"></textarea></div>
     </form>`;
   const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="adjSave">Save Adjustment</button>`;
   const modal = formModal('Stock Adjustment', body, footer);
-  document.getElementById('adjSave').addEventListener('click', () => {
-    const prod = productById(document.getElementById('adjProduct').value);
-    const type = document.getElementById('adjType').value;
+
+  document.getElementById('adjSave').addEventListener('click', async () => {
+    const productId = document.getElementById('adjProduct').value;
     const qty = +document.getElementById('adjQty').value;
+    if (!productId) { showToast('Choose a product', 'error'); return; }
     if (!qty || qty < 1) { showToast('Enter a valid quantity', 'error'); return; }
-    if (type === 'increase') prod.stock += qty; else prod.stock = Math.max(0, prod.stock - qty);
-    STOCK_ADJUSTMENTS.unshift({ id: 'adj' + Date.now(), date: document.getElementById('adjDate').value, product: prod.name, type, qty, reason: document.getElementById('adjReason').value, ref: document.getElementById('adjRef').value, notes: document.getElementById('adjNotes').value });
+
+    const payload = {
+      product_id: +productId,
+      type: document.getElementById('adjType').value,
+      quantity: qty,
+      reason: document.getElementById('adjReason').value,
+      notes: document.getElementById('adjNotes').value || null,
+    };
+
+    const saveBtn = document.getElementById('adjSave');
+    saveBtn.disabled = true;
+    try {
+      await apiFetch('/catalog/stock-adjustments', { method: 'POST', body: payload });
+    } catch (e) {
+      saveBtn.disabled = false;
+      // The backend rejects a decrease that would take stock below
+      // zero with a field-level error on quantity — surface that
+      // exact message rather than a generic one.
+      showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+      return;
+    }
+
+    showToast('Stock adjusted successfully', 'success');
     modal.hide();
     renderInvTab();
-    showToast('Stock adjusted successfully', 'success');
   });
 }
 
@@ -182,15 +215,47 @@ function renderAdjustments(c) {
       <div class="card-body p-0">
         <div class="table-responsive">
           <table class="table table-hover">
-            <thead><tr><th>Ref #</th><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Reason</th><th>Notes</th></tr></thead>
-            <tbody>
-              ${STOCK_ADJUSTMENTS.map(a => `<tr><td class="fw-600">${a.ref}</td><td>${fmtDate(a.date)}</td><td>${a.product}</td><td>${a.type === 'increase' ? '<span class="badge bg-soft-success">Increase</span>' : '<span class="badge bg-soft-danger">Decrease</span>'}</td><td>${a.qty}</td><td>${a.reason}</td><td class="small text-muted">${a.notes}</td></tr>`).join('')}
-            </tbody>
+            <thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Balance After</th><th>Reason</th><th>Notes</th><th>By</th></tr></thead>
+            <tbody id="adjTableBody"></tbody>
           </table>
         </div>
       </div>
+      <div class="card-body d-flex justify-content-between align-items-center" id="adjPagination"></div>
     </div>`;
   c.querySelector('#newAdj').addEventListener('click', () => adjustmentModal());
+  renderAdjustmentsTable(1);
+}
+
+async function renderAdjustmentsTable(page) {
+  const body = document.getElementById('adjTableBody');
+  if (!body) return; // tab may have been switched away before this resolved
+  body.innerHTML = skeletonRows(6, 8);
+
+  let result;
+  try {
+    result = await apiFetch(`/catalog/stock-adjustments?page=${page}&per_page=15`);
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="8">${emptyState('bi-exclamation-triangle', "Couldn't load adjustments", e.message)}</td></tr>`;
+    return;
+  }
+
+  const items = result.data;
+  const meta = result.meta;
+  body.innerHTML = items.length ? items.map(a => `
+    <tr>
+      <td>${fmtDateTime(a.created_at)}</td>
+      <td>${a.product?.name || '—'}</td>
+      <td>${a.type === 'adjustment_in' ? '<span class="badge bg-soft-success">Increase</span>' : '<span class="badge bg-soft-danger">Decrease</span>'}</td>
+      <td>${a.quantity}</td>
+      <td class="fw-600">${a.balance_after}${a.product?.unit ? ' ' + a.product.unit.short_code : ''}</td>
+      <td>${a.reason || '—'}</td>
+      <td class="small text-muted">${a.notes || '—'}</td>
+      <td class="small text-muted">${a.user?.name || '—'}</td>
+    </tr>`).join('') : `<tr><td colspan="8">${emptyState('bi-arrow-down-up', 'No adjustments yet', 'Manual stock corrections will show up here.')}</td></tr>`;
+
+  const pag = document.getElementById('adjPagination');
+  pag.innerHTML = `<div class="small text-muted">${meta.total} adjustments</div>${renderPagination(meta.total, meta.current_page, meta.per_page, renderAdjustmentsTable)}`;
+  attachPaginationClicks(pag, renderAdjustmentsTable);
 }
 
 function renderStockHistory(c) {
@@ -200,24 +265,51 @@ function renderStockHistory(c) {
       <div class="card-body p-0">
         <div class="table-responsive">
           <table class="table table-hover">
-            <thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Reason</th><th>Ref #</th></tr></thead>
-            <tbody>
-              ${STOCK_ADJUSTMENTS.map(a => `<tr><td>${fmtDate(a.date)}</td><td>${a.product}</td><td>${a.type==='increase'?'<span class="text-success">In</span>':'<span class="text-danger">Out</span>'}</td><td>${a.qty}</td><td>${a.reason}</td><td>${a.ref}</td></tr>`).join('')}
-            </tbody>
+            <thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Balance After</th><th>Reason</th></tr></thead>
+            <tbody id="histTableBody"></tbody>
           </table>
         </div>
       </div>
     </div>`;
+  renderStockHistoryTable();
 }
 
-function showStockHistory(id) {
-  const p = productById(id);
-  const body = `<div><h6 class="fw-700">${p.name}</h6><p class="small text-muted">Current stock: ${p.stock} ${p.unit}</p>
-    <table class="table table-sm"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Reason</th></tr></thead><tbody>
-    ${STOCK_ADJUSTMENTS.filter(a=>a.product===p.name).map(a=>`<tr><td>${fmtDate(a.date)}</td><td>${a.type}</td><td>${a.qty}</td><td>${a.reason}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">No history</td></tr>'}
+async function renderStockHistoryTable() {
+  const body = document.getElementById('histTableBody');
+  if (!body) return;
+  body.innerHTML = skeletonRows(6, 6);
+  let result;
+  try {
+    result = await apiFetch('/catalog/stock-adjustments?per_page=50');
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6">${emptyState('bi-exclamation-triangle', "Couldn't load history", e.message)}</td></tr>`;
+    return;
+  }
+  body.innerHTML = result.data.length ? result.data.map(a => `
+    <tr>
+      <td>${fmtDateTime(a.created_at)}</td>
+      <td>${a.product?.name || '—'}</td>
+      <td>${a.type === 'adjustment_in' ? '<span class="text-success">In</span>' : '<span class="text-danger">Out</span>'}</td>
+      <td>${a.quantity}</td>
+      <td>${a.balance_after}</td>
+      <td>${a.reason || '—'}</td>
+    </tr>`).join('') : `<tr><td colspan="6" class="text-muted text-center py-4">No stock movement history yet.</td></tr>`;
+}
+
+async function showStockHistory(p) {
+  const modal = formModal('Stock History — ' + p.name, simpleLoading(), `<button class="btn btn-light" data-bs-dismiss="modal">Close</button>`);
+  let result;
+  try {
+    result = await apiFetch(`/catalog/stock-adjustments?product_id=${p.id}&per_page=50`);
+  } catch (e) {
+    document.querySelector('.modal-body').innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load history", e.message);
+    return;
+  }
+  document.querySelector('.modal-body').innerHTML = `
+    <div><h6 class="fw-700">${p.name}</h6><p class="small text-muted">Current stock: ${p.current_stock} ${p.unit.short_code}</p>
+    <table class="table table-sm"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Balance After</th><th>Reason</th></tr></thead><tbody>
+    ${result.data.map(a => `<tr><td>${fmtDate(a.created_at)}</td><td>${a.type === 'adjustment_in' ? 'Increase' : 'Decrease'}</td><td>${a.quantity}</td><td>${a.balance_after}</td><td>${a.reason || '—'}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted">No history</td></tr>'}
     </tbody></table></div>`;
-  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Close</button>`;
-  formModal('Stock History — ' + p.name, body, footer);
 }
 
 function renderReorderReport(c) {

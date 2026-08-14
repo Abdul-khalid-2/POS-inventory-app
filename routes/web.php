@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ProductController as ProductApiController;
+use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\TaxController;
 use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Auth\AuthController;
@@ -97,5 +98,11 @@ Route::middleware('auth')->group(function () {
         // Read-only — the product form needs real tax IDs to submit;
         // full tax management is a Settings-screen feature, not built yet.
         Route::get('taxes', [TaxController::class, 'index'])->name('taxes.index')->middleware('module:settings');
+
+        // The stock adjustment audit log — see StockAdjustmentController
+        // for why this is scoped to manual adjustments only, not every
+        // stock_movements row.
+        Route::get('stock-adjustments', [StockAdjustmentController::class, 'index'])->name('stock-adjustments.index');
+        Route::post('stock-adjustments', [StockAdjustmentController::class, 'store'])->name('stock-adjustments.store');
     });
 });

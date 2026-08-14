@@ -255,7 +255,29 @@ items off as we complete them so it always reflects real project status.
       adjustments (into `stock_movements`) is the *next* checklist
       item, not this one, and wiring the buttons against real product
       IDs before that exists would just break them.
-- [ ] Stock adjustment flow (increase/decrease with reason + audit log)
+- [x] Stock adjustment flow (increase/decrease with reason + audit log)
+      — `StockAdjustmentController` (`POST /catalog/stock-adjustments`
+      to create, `GET` to list) writes real `stock_movements` rows and
+      keeps `products.current_stock` in sync in the same DB
+      transaction, with a row lock (`lockForUpdate`) so two
+      simultaneous adjustments on the same product can't race each
+      other into a wrong balance. A decrease that would take stock
+      below zero is rejected with a clear 422, not silently clamped to
+      0 like the old mock did (clamping would've meant the recorded
+      quantity didn't match what actually happened — bad for an audit
+      log). Added a `notes` column to `stock_movements`
+      (`reason` is a short category — Damaged/Returned/Correction/
+      Lost/Found/Other — `notes` is free text alongside it; the
+      original migration only had `reason`). Dropped the "Reference #"
+      and "Date" fields from the Adjust Stock form: the reference
+      number was random decoration with nothing to reference, and
+      letting adjustments be backdated undermines what an audit log is
+      for — every adjustment now stamps the real time it happened.
+      Inventory's Adjustments and Stock History tabs, and the per-row
+      Adjust/History actions (stubbed with a toast in the previous
+      step), are now fully live — including a `balance_after` column
+      the old mock never had, since the mock had no reliable way to
+      keep a running balance consistent across edits.
 - [ ] Low-stock / out-of-stock triggers feeding the dashboard + notifications
 
 ### Phase 5 — POS Terminal (core business logic)

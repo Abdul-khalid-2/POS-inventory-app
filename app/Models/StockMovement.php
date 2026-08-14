@@ -13,7 +13,7 @@ class StockMovement extends Model
 
     protected $fillable = [
         'product_id', 'type', 'quantity', 'balance_after',
-        'reference_type', 'reference_id', 'reason', 'user_id',
+        'reference_type', 'reference_id', 'reason', 'notes', 'user_id',
     ];
 
     public function product(): BelongsTo
