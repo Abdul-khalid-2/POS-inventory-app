@@ -1,6 +1,10 @@
 <?php
 
 use App\Http\Controllers\AccountController;
+use App\Http\Controllers\Api\BrandController;
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\ProductController as ProductApiController;
+use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
@@ -67,4 +71,15 @@ Route::middleware('auth')->group(function () {
     // Notifications also has no matrix entry — every authenticated
     // user gets their own notifications regardless of role.
     Route::get('/notifications', NotificationController::class . '@index')->name('notifications');
+
+    // JSON CRUD endpoints backing the Products screen (and, later,
+    // other screens as they're wired up — see README Phase 3+).
+    // Each controller gates its own actions per-ability via
+    // HasMiddleware, so no extra middleware is applied here.
+    Route::prefix('catalog')->name('catalog.')->group(function () {
+        Route::apiResource('products', ProductApiController::class);
+        Route::apiResource('categories', CategoryController::class);
+        Route::apiResource('brands', BrandController::class);
+        Route::apiResource('units', UnitController::class);
+    });
 });

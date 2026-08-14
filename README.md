@@ -135,7 +135,25 @@ items off as we complete them so it always reflects real project status.
       link on the login page; needs mail sending configured first.
 
 ### Phase 3 — Products, Categories, Brands, Units
-- [ ] CRUD endpoints/controllers backed by the database
+- [x] CRUD endpoints/controllers backed by the database —
+      `app/Http/Controllers/Api/{Product,Category,Brand,Unit}Controller.php`,
+      JSON endpoints under `/catalog/{products,categories,brands,units}`
+      (`routes/web.php`), full `index/store/show/update/destroy` via
+      `Route::apiResource`. Each controller gates its own actions
+      per-ability using Laravel's `HasMiddleware` — Products/Categories/
+      Brands check the `products` module permission (they're all tabs
+      on the one Products screen), Units checks `settings` (units
+      management lives there per the original UI spec). Product index
+      supports `q` search (name/sku/barcode), `category_id`,
+      `brand_id`, `status`, and `low_stock=1` filters, plus pagination.
+      Deliberate design call: `current_stock` is only settable when
+      *creating* a product (opening stock) — editing an existing
+      product can't touch stock directly, since that has to flow
+      through `stock_movements` once Phase 4 builds real inventory
+      adjustments, not a silent product-edit side effect. Delete on
+      any of the four returns a friendly 422 (not a raw DB error) if
+      the record has linked history and can't be removed. JSON shape
+      defined in `app/Http/Resources/`.
 - [ ] Image upload handling
 - [ ] Barcode/SKU generation + barcode label printing
 - [ ] Wire `products.js` to real endpoints instead of `data.js`
