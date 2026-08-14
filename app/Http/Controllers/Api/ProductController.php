@@ -9,7 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class ProductController extends Controller implements HasMiddleware
@@ -19,7 +19,7 @@ class ProductController extends Controller implements HasMiddleware
         return [
             new Middleware('module:products', only: ['index', 'show']),
             new Middleware('module:products,add', only: ['store']),
-            new Middleware('module:products,edit', only: ['update']),
+            new Middleware('module:products,edit', only: ['update', 'uploadImage', 'deleteImage']),
             new Middleware('module:products,delete', only: ['destroy']),
         ];
     }
@@ -97,7 +97,50 @@ class ProductController extends Controller implements HasMiddleware
             ], 422);
         }
 
+        // Product record is gone — its image file has no owner left,
+        // so clean it up rather than leaving an orphaned file behind.
+        if ($product->image) {
+            Storage::disk('public')->delete($product->image);
+        }
+
         return response()->json(null, 204);
+    }
+
+    /**
+     * POST /catalog/products/{product}/image
+     * A dedicated endpoint rather than folding this into store/update —
+     * those two accept a JSON body; this one accepts multipart/form-data.
+     * A brand-new product uploads its image here right after creation.
+     */
+    public function uploadImage(Request $request, Product $product): JsonResponse
+    {
+        $request->validate([
+            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+        ]);
+
+        // Replacing an existing image — remove the old file so it
+        // doesn't just sit around unused on disk.
+        if ($product->image) {
+            Storage::disk('public')->delete($product->image);
+        }
+
+        $path = $request->file('image')->store('products', 'public');
+        $product->update(['image' => $path]);
+
+        return (new ProductResource($product->load(['category', 'brand', 'unit', 'tax'])))->response();
+    }
+
+    /**
+     * DELETE /catalog/products/{product}/image
+     */
+    public function deleteImage(Product $product): JsonResponse
+    {
+        if ($product->image) {
+            Storage::disk('public')->delete($product->image);
+            $product->update(['image' => null]);
+        }
+
+        return (new ProductResource($product->load(['category', 'brand', 'unit', 'tax'])))->response();
     }
 
     /**

@@ -154,7 +154,17 @@ items off as we complete them so it always reflects real project status.
       any of the four returns a friendly 422 (not a raw DB error) if
       the record has linked history and can't be removed. JSON shape
       defined in `app/Http/Resources/`.
-- [ ] Image upload handling
+- [x] Image upload handling — dedicated multipart endpoints since the
+      main CRUD endpoints take JSON bodies:
+      `POST /catalog/products/{product}/image` and
+      `DELETE /catalog/products/{product}/image`, both in
+      `ProductController`. Validates as an actual image, 2MB max,
+      stored on the `public` disk under `products/`. Replacing or
+      deleting an image cleans up the old file on disk rather than
+      leaving it orphaned; deleting the product itself does the same.
+      `ProductResource` now returns both the raw `image` path and a
+      ready-to-use `image_url`. One-time local setup needed:
+      `php artisan storage:link`.
 - [ ] Barcode/SKU generation + barcode label printing
 - [ ] Wire `products.js` to real endpoints instead of `data.js`
 

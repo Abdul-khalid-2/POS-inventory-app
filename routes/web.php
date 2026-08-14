@@ -78,6 +78,8 @@ Route::middleware('auth')->group(function () {
     // HasMiddleware, so no extra middleware is applied here.
     Route::prefix('catalog')->name('catalog.')->group(function () {
         Route::apiResource('products', ProductApiController::class);
+        Route::post('products/{product}/image', [ProductApiController::class, 'uploadImage'])->name('products.image.upload');
+        Route::delete('products/{product}/image', [ProductApiController::class, 'deleteImage'])->name('products.image.delete');
         Route::apiResource('categories', CategoryController::class);
         Route::apiResource('brands', BrandController::class);
         Route::apiResource('units', UnitController::class);
