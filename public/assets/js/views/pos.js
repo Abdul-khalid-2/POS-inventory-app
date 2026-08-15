@@ -6,7 +6,7 @@ let posState = {
   customerId: '', // '' = walk-in (customer_id: null)
   discount: 0,
   discountType: 'amount',
-  paymentMethod: 'cash',
+  payments: [], // [{method, amount}] — the actual split-payment lines
   activeCategory: 'all',
   search: '',
   heldOrders: [],
@@ -20,6 +20,7 @@ registerView('pos', async function() {
   breadcrumb([{ label: 'Home', view: 'dashboard' }, { label: 'POS Terminal' }]);
   posState.cart = [];
   posState.discount = 0;
+  posState.payments = [];
 
   document.getElementById('content').innerHTML = simpleLoading();
   try {
@@ -102,24 +103,38 @@ registerView('pos', async function() {
             <div class="total-row"><span>Tax</span><span id="posTaxShow">${CURRENCY}0.00</span></div>
             <div class="total-row grand"><span>Total</span><span id="posGrandTotal">${CURRENCY}0.00</span></div>
           </div>
-          <div class="payment-tabs" id="paymentTabs">
-            <div class="payment-tab active" data-method="cash"><i class="bi bi-cash-coin"></i>Cash</div>
-            <div class="payment-tab" data-method="card"><i class="bi bi-credit-card"></i>Card</div>
-            <div class="payment-tab" data-method="wallet"><i class="bi bi-phone"></i>Wallet</div>
-            <div class="payment-tab" data-method="credit"><i class="bi bi-wallet2"></i>Credit</div>
-          </div>
-          <div class="row g-2 mb-2" id="cashPaymentRow">
-            <div class="col-7">
-              <label class="form-label small fw-600 mb-1">Amount Tendered</label>
-              <input type="number" class="form-control form-control-sm" id="posTendered" placeholder="0.00" min="0">
+          <div class="payments-section mb-2">
+            <label class="form-label small fw-600 mb-1">Payments</label>
+            <div id="paymentsList" class="mb-2"></div>
+            <div class="row g-2 align-items-end">
+              <div class="col-4">
+                <select class="form-select form-select-sm" id="payMethodSelect">
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="wallet">Wallet</option>
+                </select>
+              </div>
+              <div class="col-5">
+                <input type="number" class="form-control form-control-sm" id="payAmountInput" placeholder="Amount" min="0.01" step="0.01">
+              </div>
+              <div class="col-3">
+                <button class="btn btn-outline-primary btn-sm w-100" id="addPaymentBtn" title="Add — leave amount blank to pay the full remaining balance">Add</button>
+              </div>
             </div>
-            <div class="col-5">
-              <label class="form-label small fw-600 mb-1">Change</label>
-              <input type="text" class="form-control form-control-sm" id="posChange" readonly value="${CURRENCY}0.00">
+            <div class="d-flex justify-content-between mt-2">
+              <span class="small text-muted">Remaining</span>
+              <span class="fw-700" id="posRemaining">${CURRENCY}0.00</span>
             </div>
-          </div>
-          <div class="small text-muted mb-2" id="creditNote" style="display:none;">
-            <i class="bi bi-info-circle me-1"></i>No payment collected — the full total is added to this customer's balance.
+            <div class="small text-muted mt-1" id="cashTenderedRow" style="display:none;">
+              <div class="row g-2 align-items-center">
+                <div class="col-6">Cash tendered</div>
+                <div class="col-6"><input type="number" class="form-control form-control-sm" id="posTendered" placeholder="0.00" min="0"></div>
+              </div>
+              <div class="d-flex justify-content-between mt-1"><span>Change</span><span class="fw-600" id="posChange">${CURRENCY}0.00</span></div>
+            </div>
+            <div class="small text-warning mt-1" id="creditWarning" style="display:none;">
+              <i class="bi bi-info-circle me-1"></i>Select a customer above to put the remaining balance on their account — a walk-in sale must be paid in full.
+            </div>
           </div>
           <div class="d-flex gap-2">
             <button class="btn btn-outline-secondary flex-grow-1" id="holdOrderBtn"><i class="bi bi-pause-circle me-1"></i>Hold</button>
@@ -146,6 +161,7 @@ registerView('pos', async function() {
   attachPOSEvents();
   renderPOSProducts();
   renderCart();
+  renderPaymentsList();
 });
 
 function renderPOSProducts() {
@@ -250,10 +266,49 @@ function updateTotals() {
   document.getElementById('posTax').value = fmtMoney(tax);
   document.getElementById('posGrandTotal').textContent = fmtMoney(total);
   document.getElementById('cartCount').textContent = posState.cart.reduce((s, i) => s + i.qty, 0) + ' items';
-  const tendered = parseFloat(document.getElementById('posTendered')?.value) || 0;
-  const change = Math.max(0, tendered - total);
-  const changeEl = document.getElementById('posChange');
-  if (changeEl) changeEl.value = fmtMoney(change);
+
+  const paid = posState.payments.reduce((s, p) => s + p.amount, 0);
+  const remaining = Math.max(0, +(total - paid).toFixed(2));
+  document.getElementById('posRemaining').textContent = fmtMoney(remaining);
+  document.getElementById('posRemaining').className = 'fw-700' + (remaining > 0 ? ' text-danger' : ' text-success');
+
+  const hasCustomer = !!posState.customerId;
+  document.getElementById('creditWarning').style.display = (remaining > 0 && !hasCustomer) ? '' : 'none';
+
+  const cashApplied = posState.payments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0);
+  const tenderedRow = document.getElementById('cashTenderedRow');
+  if (cashApplied > 0) {
+    tenderedRow.style.display = '';
+    const tendered = parseFloat(document.getElementById('posTendered')?.value) || 0;
+    const change = Math.max(0, tendered - cashApplied);
+    const changeEl = document.getElementById('posChange');
+    if (changeEl) changeEl.textContent = fmtMoney(change);
+  } else if (tenderedRow) {
+    tenderedRow.style.display = 'none';
+  }
+}
+
+function renderPaymentsList() {
+  const list = document.getElementById('paymentsList');
+  if (!list) return;
+  if (!posState.payments.length) {
+    list.innerHTML = '<div class="small text-muted">No payments added yet.</div>';
+    return;
+  }
+  const icons = { cash: 'bi-cash-coin', card: 'bi-credit-card', wallet: 'bi-phone' };
+  list.innerHTML = posState.payments.map((p, i) => `
+    <div class="d-flex justify-content-between align-items-center py-1 px-2 mb-1" style="background:var(--bg-body);border-radius:6px;">
+      <span class="small text-capitalize"><i class="bi ${icons[p.method]} me-1"></i>${p.method}</span>
+      <span class="d-flex align-items-center gap-2">
+        <span class="fw-600">${fmtMoney(p.amount)}</span>
+        <button class="icon-btn danger" data-remove-payment="${i}" style="width:22px;height:22px;"><i class="bi bi-x" style="font-size:14px;"></i></button>
+      </span>
+    </div>`).join('');
+  list.querySelectorAll('[data-remove-payment]').forEach(b => b.addEventListener('click', () => {
+    posState.payments.splice(+b.dataset.removePayment, 1);
+    renderPaymentsList();
+    updateTotals();
+  }));
 }
 
 function attachPOSEvents() {
@@ -267,18 +322,32 @@ function attachPOSEvents() {
     renderPOSProducts();
   }));
 
-  document.getElementById('posCustomer').addEventListener('change', e => { posState.customerId = e.target.value; });
+  document.getElementById('posCustomer').addEventListener('change', e => { posState.customerId = e.target.value; updateTotals(); });
   document.getElementById('posDiscount').addEventListener('input', e => { posState.discount = parseFloat(e.target.value) || 0; updateTotals(); });
   document.getElementById('posDiscountType').addEventListener('change', e => { posState.discountType = e.target.value; updateTotals(); });
   document.getElementById('posTendered').addEventListener('input', () => updateTotals());
 
-  document.querySelectorAll('.payment-tab').forEach(t => t.addEventListener('click', () => {
-    document.querySelectorAll('.payment-tab').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    posState.paymentMethod = t.dataset.method;
-    document.getElementById('cashPaymentRow').style.display = (t.dataset.method === 'cash') ? '' : 'none';
-    document.getElementById('creditNote').style.display = (t.dataset.method === 'credit') ? '' : 'none';
-  }));
+  document.getElementById('addPaymentBtn').addEventListener('click', () => {
+    if (!posState.cart.length) { showToast('Cart is empty', 'warning'); return; }
+    const { total } = calcTotals();
+    const alreadyPaid = posState.payments.reduce((s, p) => s + p.amount, 0);
+    const remaining = +(total - alreadyPaid).toFixed(2);
+    if (remaining <= 0) { showToast('Total is already fully covered', 'info'); return; }
+
+    const method = document.getElementById('payMethodSelect').value;
+    const amountInput = document.getElementById('payAmountInput');
+    let amount = parseFloat(amountInput.value);
+    if (!amount || amount <= 0) amount = remaining; // blank = pay the full remaining balance
+    if (amount > remaining) {
+      showToast(`Only ${fmtMoney(remaining)} remaining — amount capped`, 'info');
+      amount = remaining;
+    }
+
+    posState.payments.push({ method, amount: +amount.toFixed(2) });
+    amountInput.value = '';
+    renderPaymentsList();
+    updateTotals();
+  });
 
   document.getElementById('clearCart').addEventListener('click', () => {
     if (!posState.cart.length) return;
@@ -310,8 +379,10 @@ function holdOrder() {
   posState.heldOrders.push({ id: Date.now(), cart: [...posState.cart], customerId: posState.customerId, discount: posState.discount, discountType: posState.discountType, total });
   posState.cart = [];
   posState.discount = 0;
+  posState.payments = [];
   document.getElementById('posDiscount').value = 0;
   renderCart();
+  renderPaymentsList();
   document.getElementById('heldCount').textContent = posState.heldOrders.length;
   showToast('Order held successfully', 'success');
   renderHeldList();
@@ -354,12 +425,14 @@ function renderHeldList() {
     posState.customerId = held.customerId;
     posState.discount = held.discount;
     posState.discountType = held.discountType;
+    posState.payments = [];
     document.getElementById('posCustomer').value = held.customerId;
     document.getElementById('posDiscount').value = held.discount;
     document.getElementById('posDiscountType').value = held.discountType;
     posState.heldOrders.splice(idx, 1);
     document.getElementById('heldCount').textContent = posState.heldOrders.length;
     renderCart();
+    renderPaymentsList();
     closeHeldDrawer();
     showToast('Held order resumed', 'success');
   }));
@@ -386,9 +459,18 @@ async function completeSale() {
   if (!posState.cart.length) { showToast('Cart is empty — add products first', 'warning'); return; }
 
   const { total } = calcTotals();
+  const paid = posState.payments.reduce((s, p) => s + p.amount, 0);
+  const remaining = +(total - paid).toFixed(2);
+
+  if (remaining > 0 && !posState.customerId) {
+    showToast('Select a customer to put the remaining balance on credit, or add more payments to cover the total', 'error');
+    return;
+  }
+
+  const cashApplied = posState.payments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0);
   const tendered = parseFloat(document.getElementById('posTendered').value) || 0;
-  if (posState.paymentMethod === 'cash' && tendered < total) {
-    showToast('Insufficient cash tendered', 'error');
+  if (cashApplied > 0 && tendered < cashApplied) {
+    showToast('Cash tendered is less than the cash payment amount', 'error');
     return;
   }
 
@@ -397,8 +479,7 @@ async function completeSale() {
     items: posState.cart.map(i => ({ product_id: i.productId, quantity: i.qty })),
     discount_type: posState.discountType,
     discount_value: posState.discount,
-    payment_method: posState.paymentMethod,
-    amount_tendered: posState.paymentMethod === 'cash' ? tendered : undefined,
+    payments: posState.payments.map(p => ({ method: p.method, amount: p.amount })),
   };
 
   const chargeBtn = document.getElementById('chargeBtn');
@@ -414,12 +495,14 @@ async function completeSale() {
     return;
   }
 
-  const change = Math.max(0, tendered - sale.grand_total);
+  const change = Math.max(0, tendered - cashApplied);
   showSaleReceipt(sale, change);
 
   posState.cart = [];
   posState.discount = 0;
+  posState.payments = [];
   renderCart();
+  renderPaymentsList();
 
   // Stock just changed server-side — refresh the grid so quantities
   // (and out-of-stock styling) reflect what actually happened.
@@ -432,6 +515,9 @@ async function completeSale() {
 
 function showSaleReceipt(sale, change) {
   const itemCount = sale.items.reduce((s, i) => s + i.quantity, 0);
+  const paymentLine = sale.payments && sale.payments.length
+    ? sale.payments.map(p => `${p.method} ${fmtMoney(p.amount)}`).join(' + ')
+    : 'Credit';
   const successHtml = `
     <div class="text-center py-3">
       <div class="kpi-icon mx-auto mb-3 bg-soft-success" style="width:64px;height:64px;font-size:32px;"><i class="bi bi-check-lg"></i></div>
@@ -441,14 +527,14 @@ function showSaleReceipt(sale, change) {
         <div class="col-6"><div class="text-muted small">Customer</div><div class="fw-600">${sale.customer?.name || 'Walk-in Customer'}</div></div>
         <div class="col-6 text-end"><div class="text-muted small">Date</div><div class="fw-600">${fmtDate(sale.sale_date)}</div></div>
         <div class="col-6 mt-2"><div class="text-muted small">Items</div><div class="fw-600">${itemCount}</div></div>
-        <div class="col-6 mt-2 text-end"><div class="text-muted small">Payment</div><div class="fw-600 text-capitalize">${sale.payment_status === 'due' ? 'Credit' : sale.payment_status}</div></div>
+        <div class="col-6 mt-2 text-end"><div class="text-muted small">Payment</div><div class="fw-600 text-capitalize">${paymentLine}</div></div>
         <div class="col-12 mt-3"><hr></div>
         <div class="col-6"><div class="text-muted small">Subtotal</div><div class="fw-600">${fmtMoney(sale.subtotal)}</div></div>
         <div class="col-6 text-end"><div class="text-muted small">Discount</div><div class="fw-600">-${fmtMoney(sale.discount)}</div></div>
         <div class="col-6 mt-1"><div class="text-muted small">Tax</div><div class="fw-600">${fmtMoney(sale.tax_total)}</div></div>
         <div class="col-6 mt-1 text-end"><div class="text-muted small">Total</div><div class="fw-700 fs-5">${fmtMoney(sale.grand_total)}</div></div>
-        ${sale.paid_amount > 0 && change > 0 ? `<div class="col-6 mt-1"><div class="text-muted small">Tendered</div><div class="fw-600">${fmtMoney(sale.paid_amount + change)}</div></div><div class="col-6 mt-1 text-end"><div class="text-muted small">Change</div><div class="fw-600 text-success">${fmtMoney(change)}</div></div>` : ''}
-        ${sale.due_amount > 0 ? `<div class="col-12 mt-2"><div class="alert alert-warning py-2 small mb-0">Added ${fmtMoney(sale.due_amount)} to this customer's balance.</div></div>` : ''}
+        ${change > 0 ? `<div class="col-6 mt-1"><div class="text-muted small">Change Due</div><div class="fw-600 text-success">${fmtMoney(change)}</div></div>` : ''}
+        ${sale.due_amount > 0 ? `<div class="col-12 mt-2"><div class="alert alert-warning py-2 small mb-0">Added ${fmtMoney(sale.due_amount)} to ${sale.customer?.name || 'this customer'}'s balance.</div></div>` : ''}
       </div>
     </div>`;
 
@@ -484,7 +570,9 @@ function printReceipt(sale, change) {
       <tr><td>Discount</td><td class="right">-${fmtMoney(sale.discount)}</td></tr>
       <tr><td>Tax</td><td class="right">${fmtMoney(sale.tax_total)}</td></tr>
       <tr class="bold"><td>TOTAL</td><td class="right">${fmtMoney(sale.grand_total)}</td></tr>
+      ${(sale.payments || []).map(p => `<tr><td class="right" colspan="2" style="text-transform:capitalize;">Paid (${p.method}): ${fmtMoney(p.amount)}</td></tr>`).join('')}
       ${change > 0 ? `<tr><td>Change</td><td class="right">${fmtMoney(change)}</td></tr>` : ''}
+      ${sale.due_amount > 0 ? `<tr><td colspan="2" class="right">Balance Due: ${fmtMoney(sale.due_amount)}</td></tr>` : ''}
     </table>
     <div class="line"></div>
     <div class="center">${SETTINGS.receipt.footer}</div>

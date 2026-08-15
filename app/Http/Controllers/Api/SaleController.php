@@ -38,11 +38,12 @@ class SaleController extends Controller implements HasMiddleware
      * could send anything for a "price"; only the server's numbers
      * ever get persisted.
      *
-     * Split payments across multiple methods on one sale are NOT
-     * supported yet — that's the next roadmap item. For now a sale is
-     * either paid in full by one method (cash/card/wallet) or sold on
-     * credit (payment_method=credit — no Payment row, the full total
-     * becomes the customer's due balance).
+     * Supports genuine split payments: `payments` is an array of
+     * {method, amount} — one Payment row per entry, same polymorphic
+     * relation Purchases already use. An empty array (or one that
+     * doesn't cover the full total) means the remainder is due; that's
+     * only allowed for a real customer, never a walk-in sale — you
+     * can't extend credit to someone with no account to bill.
      */
     public function store(Request $request): JsonResponse
     {
@@ -53,14 +54,16 @@ class SaleController extends Controller implements HasMiddleware
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'discount_type' => ['nullable', Rule::in(['amount', 'percent'])],
             'discount_value' => ['nullable', 'numeric', 'min:0'],
-            'payment_method' => ['required', Rule::in(['cash', 'card', 'wallet', 'credit'])],
-            'amount_tendered' => ['nullable', 'numeric', 'min:0'],
+            'payments' => ['nullable', 'array'],
+            'payments.*.method' => ['required_with:payments', Rule::in(['cash', 'card', 'wallet'])],
+            'payments.*.amount' => ['required_with:payments', 'numeric', 'min:0.01'],
         ]);
 
         $discountType = $data['discount_type'] ?? 'amount';
         $discountValue = $data['discount_value'] ?? 0;
+        $payments = $data['payments'] ?? [];
 
-        [$sale, $stockEffects] = DB::transaction(function () use ($data, $discountType, $discountValue, $request) {
+        [$sale, $stockEffects] = DB::transaction(function () use ($data, $discountType, $discountValue, $payments, $request) {
             // Lock every product row up front, in a stable (sorted)
             // order, so two simultaneous checkouts touching overlapping
             // products can't deadlock each other.
@@ -113,21 +116,22 @@ class SaleController extends Controller implements HasMiddleware
 
             $grandTotal = round($subtotal - $discountAmount + $taxTotal, 2);
 
-            $paidAmount = 0;
-            if ($data['payment_method'] === 'cash') {
-                $tendered = (float) ($data['amount_tendered'] ?? 0);
-                if ($tendered < $grandTotal) {
-                    throw ValidationException::withMessages([
-                        'amount_tendered' => 'Amount tendered is less than the total due.',
-                    ]);
-                }
-                $paidAmount = $grandTotal;
-            } elseif (in_array($data['payment_method'], ['card', 'wallet'], true)) {
-                $paidAmount = $grandTotal;
-            }
-            // 'credit' leaves $paidAmount at 0 — the full total becomes due.
+            $paidAmount = round(array_sum(array_column($payments, 'amount')), 2);
 
-            $dueAmount = round($grandTotal - $paidAmount, 2);
+            if ($paidAmount > $grandTotal + 0.01) { // small epsilon for float rounding
+                throw ValidationException::withMessages([
+                    'payments' => 'Payments add up to more than the total due. Reduce an amount, or handle change separately.',
+                ]);
+            }
+
+            $dueAmount = round(max($grandTotal - $paidAmount, 0), 2);
+
+            if ($dueAmount > 0 && empty($data['customer_id'])) {
+                throw ValidationException::withMessages([
+                    'customer_id' => 'Select a customer to put the remaining balance on credit — a walk-in sale must be paid in full.',
+                ]);
+            }
+
             $paymentStatus = $dueAmount <= 0 ? 'paid' : ($paidAmount > 0 ? 'partial' : 'due');
 
             $sale = Sale::create([
@@ -174,19 +178,23 @@ class SaleController extends Controller implements HasMiddleware
                 $stockEffects[] = ['product' => $line['product'], 'previous' => $previousStock, 'new' => $newStock];
             }
 
-            if ($paidAmount > 0) {
+            // One Payment row per entry — this is the actual "split":
+            // a $30 cash + $15.50 card sale creates two rows here,
+            // both pointing at the same sale via the polymorphic
+            // payable relation.
+            foreach ($payments as $payment) {
                 Payment::create([
                     'payable_type' => Sale::class,
                     'payable_id' => $sale->id,
-                    'amount' => $paidAmount,
-                    'method' => $data['payment_method'],
+                    'amount' => $payment['amount'],
+                    'method' => $payment['method'],
                     'received_by' => $request->user()->id,
                     'paid_at' => now(),
                 ]);
             }
 
-            // A credit sale to a real (non-walk-in) customer adds to
-            // what they owe the shop.
+            // Whatever's left (partial split payment, or fully on
+            // credit) adds to what this customer owes the shop.
             if ($dueAmount > 0 && $sale->customer_id) {
                 Customer::whereKey($sale->customer_id)->increment('current_balance', $dueAmount);
             }
@@ -201,7 +209,7 @@ class SaleController extends Controller implements HasMiddleware
             StockNotifier::checkThresholds($effect['product'], $effect['previous'], $effect['new']);
         }
 
-        return (new SaleResource($sale->load(['customer', 'cashier', 'items.product'])))
+        return (new SaleResource($sale->load(['customer', 'cashier', 'items.product', 'payments'])))
             ->response()
             ->setStatusCode(201);
     }

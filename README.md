@@ -368,12 +368,38 @@ items off as we complete them so it always reflects real project status.
       currently one method, paid in full, or credit), persisting held
       orders (still in-memory), cash register shift integration, and
       PDF receipts (print-to-browser only, same as before).
-- [ ] Split payments, discounts, tax calculation — discounts and tax
-      calculation are done (see above); what's left here is genuinely
-      just splitting one sale's payment across multiple methods (e.g.
-      part cash, part card), which the current schema already supports
-      structurally (`payments` allows multiple rows per sale via its
-      polymorphic relation) but `SaleController` doesn't accept yet.
+- [x] Split payments, discounts, tax calculation — discounts and tax
+      calculation were done in the previous step; this closes the
+      split-payments part. `SaleController::store` now accepts
+      `payments: [{method, amount}, ...]` instead of a single method —
+      one `Payment` row is created per entry, all pointing at the same
+      sale via the `payable` polymorphic relation the schema already
+      had (Phase 1 built `payments` to support exactly this; this is
+      the first thing to actually use it that way). A sale can now be
+      paid part cash + part card, for example. Rules worth knowing:
+      - The server independently sums the payment amounts and rejects
+        (422) if they'd overpay the total — same "never trust the
+        client's math" principle as the rest of checkout.
+      - Whatever isn't covered by `payments` becomes due. Due amount
+        on a **walk-in** sale (no `customer_id`) is now rejected —
+        you can't extend credit to someone with no account to bill.
+        Selecting a real customer, or covering the full total with
+        payments, are the only two ways to check out.
+      - `pos.js`'s payment tabs (an exclusive cash/card/wallet/credit
+        picker) were replaced with an "add a payment line" flow: pick
+        a method, optionally type an amount (blank = pay the full
+        remaining balance in one click, so the common single-payment
+        case is still just as fast), Add. A live **Remaining** balance
+        updates as lines are added/removed, with a clear warning if
+        it's left positive with no customer selected. "Credit" is no
+        longer a distinct 4th tab — it's just what happens when
+        `payments` doesn't fully cover the total.
+      - Cash tendered / change now applies to the *cash portion* of a
+        split sale specifically, not the whole total — correct, since
+        change is a cash-drawer concept and doesn't apply to the
+        card/wallet portion of a split payment.
+      - Both the receipt modal and the printed receipt now show a
+        line per payment method actually used, instead of assuming one.
 - [ ] Held/parked orders persisted (not just in-memory)
 - [ ] Cash register / shift open-close with expected vs counted cash
 - [ ] Receipt generation (print + PDF)

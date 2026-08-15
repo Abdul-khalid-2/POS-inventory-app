@@ -39,6 +39,10 @@ class SaleResource extends JsonResource
                 'tax' => (float) $item->tax,
                 'line_total' => (float) $item->line_total,
             ])),
+            'payments' => $this->whenLoaded('payments', fn () => $this->payments->map(fn ($payment) => [
+                'method' => $payment->method,
+                'amount' => (float) $payment->amount,
+            ])),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
