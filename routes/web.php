@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Api\BrandController;
+use App\Http\Controllers\Api\CashRegisterShiftController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CustomerController as CustomerApiController;
 use App\Http\Controllers\Api\NotificationController as NotificationApiController;
@@ -126,5 +127,13 @@ Route::middleware('auth')->group(function () {
         Route::get('sales/held', [SaleApiController::class, 'heldIndex'])->name('sales.held.index');
         Route::post('sales/hold', [SaleApiController::class, 'hold'])->name('sales.hold');
         Route::delete('sales/{sale}/held', [SaleApiController::class, 'destroyHeld'])->name('sales.held.destroy');
+
+        // Cash register shifts — per-cashier open/close, with expected
+        // cash computed from real Payment rows. See
+        // CashRegisterShiftController for why.
+        Route::get('shifts/current', [CashRegisterShiftController::class, 'current'])->name('shifts.current');
+        Route::get('shifts', [CashRegisterShiftController::class, 'index'])->name('shifts.index');
+        Route::post('shifts/open', [CashRegisterShiftController::class, 'open'])->name('shifts.open');
+        Route::post('shifts/{shift}/close', [CashRegisterShiftController::class, 'close'])->name('shifts.close');
     });
 });

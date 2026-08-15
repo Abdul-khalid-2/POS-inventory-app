@@ -14,7 +14,6 @@ registerView('dashboard', function() {
   const totalCustomers = CUSTOMERS.length - 1;
   const totalDue = CUSTOMERS.reduce((s, c) => s + c.due, 0);
   const totalPayable = SUPPLIERS.reduce((s, sup) => s + sup.payable, 0);
-  const cashInRegister = SHIFT.openingCash + SALES.filter(s => s.method === 'cash' && s.status === 'completed').reduce((s, x) => s + x.paid, 0);
 
   const html = `
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -45,7 +44,15 @@ registerView('dashboard', function() {
       ${kpiCard("Total Customers", totalCustomers, 'up', '2 new', 'bi-people', 'primary')}
       ${kpiCard("Total Due (Receivable)", fmtMoney(totalDue), 'down', '2.3%', 'bi-cash-coin', 'danger')}
       ${kpiCard("Total Payable", fmtMoney(totalPayable), 'down', '1.8%', 'bi-credit-card', 'danger')}
-      ${kpiCard("Cash in Register", fmtMoney(cashInRegister), 'up', '—', 'bi-safe', 'success')}
+      <div class="col-6 col-md-4 col-xl-3">
+        <div class="kpi-card">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <div class="kpi-icon bg-soft-success"><i class="bi bi-safe"></i></div>
+          </div>
+          <div class="kpi-label">Cash in Register</div>
+          <div class="kpi-value" id="kpiCashRegisterValue"><span class="spinner-border spinner-border-sm text-success"></span></div>
+        </div>
+      </div>
     </div>
 
     <!-- Charts Row -->
@@ -143,6 +150,7 @@ registerView('dashboard', function() {
 
   renderDashboardCharts();
   loadLowStockWidgets();
+  loadCashRegisterWidget();
 });
 
 /**
@@ -256,4 +264,25 @@ function renderDashboardCharts() {
     data: { labels: sorted.map(x => x[0]), datasets: [{ label: 'Units Sold', data: sorted.map(x => x[1]), backgroundColor: '#4f46e5', borderRadius: 6, barThickness: 20 }] },
     options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.15)' } }, y: { grid: { display: false } } } }
   });
+}
+
+/**
+ * Cash in Register — real, live data as of this phase (was a mock
+ * calc before). Reads the current user's open shift, if any; if
+ * there isn't one, shows a clear "no shift open" state rather than a
+ * $0.00 that could be misread as an empty drawer.
+ */
+async function loadCashRegisterWidget() {
+  const el = document.getElementById('kpiCashRegisterValue');
+  if (!el) return;
+  try {
+    const result = await apiFetch('/catalog/shifts/current');
+    if (!result.data) {
+      el.innerHTML = '<span class="fs-6 text-muted">No shift open</span>';
+      return;
+    }
+    el.textContent = fmtMoney(result.data.cash_in_drawer);
+  } catch (e) {
+    el.innerHTML = '<span class="fs-6 text-muted">—</span>';
+  }
 }

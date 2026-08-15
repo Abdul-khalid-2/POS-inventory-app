@@ -438,7 +438,36 @@ items off as we complete them so it always reflects real project status.
         dollar amount is correctly reapplied (as a flat amount going
         forward) — the actual discount value carries over exactly,
         just not the "how it was entered" framing.
-- [ ] Cash register / shift open-close with expected vs counted cash
+- [x] Cash register / shift open-close with expected vs counted cash
+      — `CashRegisterShiftController` (`GET /catalog/shifts/current`,
+      `GET /catalog/shifts`, `POST /catalog/shifts/open`,
+      `POST /catalog/shifts/{shift}/close`). The core payoff of this
+      being real data now: **expected cash isn't entered by anyone —
+      it's computed** from the real `Payment` rows this cashier
+      actually received in cash since the shift opened
+      (`opening_cash` + every matching `Payment` between `opened_at`
+      and now). That's a direct payoff of Phase 5's checkout work
+      being real; a mock version of this feature could only ever
+      fake that number.
+      - Shifts are **per-cashier**, not shop-wide — each person opens
+        and closes their own register, and can only close their own
+        (guarded server-side, not just hidden in the UI).
+      - `current()` also returns a *live* `cash_in_drawer` figure
+        (same calculation as closing, computed fresh on every call,
+        never persisted) — kept deliberately separate from
+        `expected_cash`, which stays `null` until the shift is
+        actually closed. This is what the Dashboard's "Cash in
+        Register" KPI now reads (previously a static mock number).
+      - `pos.js` gained a shift banner at the top of the terminal —
+        **a soft nudge, not a hard gate**: a cashier can still ring up
+        sales with no shift open. Hard-blocking checkout behind an
+        open shift is how real POS systems work, but it's meaningfully
+        more UI/UX work for a rule the checklist item doesn't actually
+        require, so it's flagged here as a deliberate scope cut rather
+        than silently softened.
+      - Closing a shift shows a summary (opening/expected/counted/
+        variance) so the cashier immediately sees whether the drawer
+        matched.
 - [ ] Receipt generation (print + PDF)
 
 ### Phase 6 — Sales & Returns

@@ -17,6 +17,7 @@ let posProducts = [];
 let posCategories = [];
 let posCustomers = [];
 let posHeldOrders = []; // fetched from the server, not held in a local array between sessions
+let posCurrentShift = null;
 
 registerView('pos', async function() {
   breadcrumb([{ label: 'Home', view: 'dashboard' }, { label: 'POS Terminal' }]);
@@ -27,22 +28,25 @@ registerView('pos', async function() {
 
   document.getElementById('content').innerHTML = simpleLoading();
   try {
-    const [productsRes, categoriesRes, customersRes, heldRes] = await Promise.all([
+    const [productsRes, categoriesRes, customersRes, heldRes, shiftRes] = await Promise.all([
       apiFetch('/catalog/products?status=active&per_page=1000'),
       apiFetch('/catalog/categories'),
       apiFetch('/catalog/customers'),
       apiFetch('/catalog/sales/held'),
+      apiFetch('/catalog/shifts/current'),
     ]);
     posProducts = productsRes.data;
     posCategories = categoriesRes.data;
     posCustomers = customersRes.data;
     posHeldOrders = heldRes.data;
+    posCurrentShift = shiftRes.data;
   } catch (e) {
     document.getElementById('content').innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load the POS terminal", e.message);
     return;
   }
 
   const html = `
+    <div id="shiftBanner"></div>
     <div class="pos-layout">
       <div class="pos-left">
         <div class="pos-search-row">
@@ -167,7 +171,110 @@ registerView('pos', async function() {
   renderPOSProducts();
   renderCart();
   renderPaymentsList();
+  renderShiftBanner();
 });
+
+/**
+ * A soft banner, not a hard gate — a cashier can still ring up sales
+ * with no shift open (blocking that entirely would meaningfully slow
+ * down testing/demoing this feature, and isn't essential to what the
+ * checklist item actually asks for: giving shifts real open/close
+ * tracking with expected-vs-counted cash). The banner is a clear
+ * nudge either way, not an enforced requirement.
+ */
+function renderShiftBanner() {
+  const el = document.getElementById('shiftBanner');
+  if (!el) return;
+
+  if (!posCurrentShift) {
+    el.innerHTML = `
+      <div class="alert alert-warning d-flex justify-content-between align-items-center py-2 mb-3">
+        <span><i class="bi bi-cash-coin me-2"></i>No shift open — sales will still work, but opening one tracks your cash drawer properly.</span>
+        <button class="btn btn-warning btn-sm" id="openShiftBtn">Open Shift</button>
+      </div>`;
+    document.getElementById('openShiftBtn').addEventListener('click', openShiftModal);
+  } else {
+    el.innerHTML = `
+      <div class="alert alert-success d-flex justify-content-between align-items-center py-2 mb-3">
+        <span><i class="bi bi-check-circle me-2"></i>Shift open since ${fmtDateTime(posCurrentShift.opened_at)} &middot; Opening cash ${fmtMoney(posCurrentShift.opening_cash)}</span>
+        <button class="btn btn-outline-success btn-sm" id="closeShiftBtn">Close Shift</button>
+      </div>`;
+    document.getElementById('closeShiftBtn').addEventListener('click', closeShiftModal);
+  }
+}
+
+function openShiftModal() {
+  const body = `
+    <div class="mb-3">
+      <label class="form-label">Opening Cash</label>
+      <div class="input-group"><span class="input-group-text">${CURRENCY}</span><input type="number" class="form-control" id="openingCashInput" min="0" step="0.01" value="0" autofocus></div>
+      <div class="form-text">The amount of cash physically in the drawer right now, before any sales.</div>
+    </div>`;
+  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="openShiftSave">Open Shift</button>`;
+  const modal = formModal('Open Shift', body, footer);
+  document.getElementById('openShiftSave').addEventListener('click', async () => {
+    const openingCash = parseFloat(document.getElementById('openingCashInput').value) || 0;
+    try {
+      const result = await apiFetch('/catalog/shifts/open', { method: 'POST', body: { opening_cash: openingCash } });
+      posCurrentShift = result.data;
+    } catch (e) {
+      showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+      return;
+    }
+    modal.hide();
+    renderShiftBanner();
+    showToast('Shift opened', 'success');
+  });
+}
+
+function closeShiftModal() {
+  const body = `
+    <div class="mb-3">
+      <div class="small text-muted mb-2">Count the cash actually in the drawer and enter it below. Expected cash (opening balance + cash sales this shift) is calculated once you submit.</div>
+      <label class="form-label">Counted Cash</label>
+      <div class="input-group"><span class="input-group-text">${CURRENCY}</span><input type="number" class="form-control" id="countedCashInput" min="0" step="0.01" autofocus></div>
+    </div>
+    <div class="mb-3"><label class="form-label">Notes (optional)</label><textarea class="form-control" id="shiftNotesInput" rows="2"></textarea></div>`;
+  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="closeShiftSave">Close Shift</button>`;
+  const modal = formModal('Close Shift', body, footer);
+  document.getElementById('closeShiftSave').addEventListener('click', async () => {
+    const countedCash = parseFloat(document.getElementById('countedCashInput').value);
+    if (isNaN(countedCash) || countedCash < 0) { showToast('Enter the counted cash amount', 'error'); return; }
+
+    let result;
+    try {
+      result = await apiFetch(`/catalog/shifts/${posCurrentShift.id}/close`, {
+        method: 'POST',
+        body: { counted_cash: countedCash, notes: document.getElementById('shiftNotesInput').value || null },
+      });
+    } catch (e) {
+      showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+      return;
+    }
+
+    modal.hide();
+    posCurrentShift = null;
+    renderShiftBanner();
+    showShiftSummary(result.data);
+  });
+}
+
+function showShiftSummary(shift) {
+  const varianceClass = shift.variance === 0 ? 'text-success' : (shift.variance > 0 ? 'text-info' : 'text-danger');
+  const varianceLabel = shift.variance === 0 ? 'Exact match' : (shift.variance > 0 ? 'Over' : 'Short');
+  const body = `
+    <div class="text-center py-2">
+      <div class="kpi-icon mx-auto mb-3 bg-soft-success" style="width:56px;height:56px;font-size:28px;"><i class="bi bi-check-lg"></i></div>
+      <h5 class="fw-700">Shift Closed</h5>
+      <div class="row text-start mt-3">
+        <div class="col-6"><div class="text-muted small">Opening Cash</div><div class="fw-600">${fmtMoney(shift.opening_cash)}</div></div>
+        <div class="col-6 text-end"><div class="text-muted small">Expected Cash</div><div class="fw-600">${fmtMoney(shift.expected_cash)}</div></div>
+        <div class="col-6 mt-2"><div class="text-muted small">Counted Cash</div><div class="fw-600">${fmtMoney(shift.counted_cash)}</div></div>
+        <div class="col-6 mt-2 text-end"><div class="text-muted small">Variance</div><div class="fw-700 ${varianceClass}">${fmtMoney(Math.abs(shift.variance))} ${varianceLabel}</div></div>
+      </div>
+    </div>`;
+  formModal('Shift Summary', body, `<button class="btn btn-primary" data-bs-dismiss="modal">Done</button>`);
+}
 
 function renderPOSProducts() {
   const grid = document.getElementById('posProductGrid');
