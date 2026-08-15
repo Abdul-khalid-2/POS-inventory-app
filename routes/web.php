@@ -23,6 +23,7 @@ use App\Http\Controllers\ProductLabelController;
 use App\Http\Controllers\PurchaseController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SaleController;
+use App\Http\Controllers\SaleReceiptController;
 use App\Http\Controllers\SettingController;
 use Illuminate\Support\Facades\Route;
 
@@ -54,6 +55,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/', DashboardController::class . '@index')->name('dashboard')->middleware('module:dashboard');
 
     Route::get('/pos', PosController::class . '@index')->name('pos')->middleware('module:pos');
+    // Real PDF receipt for a completed sale — separate from the
+    // thermal-style print in pos.js. Opens inline in the browser's
+    // PDF viewer. See SaleReceiptController.
+    Route::get('/sales/{sale}/receipt', [SaleReceiptController::class, 'show'])->name('sales.receipt');
 
     Route::get('/products', ProductController::class . '@index')->name('products')->middleware('module:products');
     // Print-ready barcode labels — a real server-rendered page, not

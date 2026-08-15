@@ -710,10 +710,12 @@ function showSaleReceipt(sale, change) {
 
   const footer = `
     <button class="btn btn-outline-secondary" id="printReceiptBtn"><i class="bi bi-printer me-1"></i>Print</button>
+    <button class="btn btn-outline-secondary" id="pdfReceiptBtn"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</button>
     <button class="btn btn-primary" id="newSaleBtn"><i class="bi bi-bag-check me-1"></i>New Sale</button>`;
 
   const modal = formModal('Sale Completed', successHtml, footer);
   document.getElementById('printReceiptBtn').addEventListener('click', () => printReceipt(sale, change));
+  document.getElementById('pdfReceiptBtn').addEventListener('click', () => window.open(`/sales/${sale.id}/receipt`, '_blank'));
   document.getElementById('newSaleBtn').addEventListener('click', () => { modal.hide(); navigateTo('pos'); });
 }
 

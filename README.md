@@ -468,7 +468,34 @@ items off as we complete them so it always reflects real project status.
       - Closing a shift shows a summary (opening/expected/counted/
         variance) so the cashier immediately sees whether the drawer
         matched.
-- [ ] Receipt generation (print + PDF)
+- [x] Receipt generation (print + PDF) — print (thermal-style, via
+      the browser's print dialog) was already done earlier in Phase 5.
+      This adds the PDF half:
+      - Added `barryvdh/laravel-dompdf` (`^3.1`) to `composer.json`.
+        **This is the one dependency in the whole build so far that
+        needs a real `composer install`/`composer require` locally** —
+        this sandbox has no access to Packagist, so unlike everything
+        else in this project, I could not install or run this package
+        myself to verify it. I checked its current version and Laravel
+        12 compatibility via a live search rather than trusting
+        possibly-stale training knowledge, but the actual `composer
+        require barryvdh/laravel-dompdf` and a first real render are
+        genuinely untested until you run it locally — flag me
+        immediately if anything errors there. Laravel 12's package
+        auto-discovery (`composer.json`'s empty `dont-discover`) means
+        no manual service-provider registration is needed beyond that.
+      - `SaleReceiptController` (`GET /sales/{sale}/receipt`) streams
+        a real PDF inline via `resources/views/sales/receipt-pdf.blade.php`
+        — a proper full-page invoice document (customer, items, tax,
+        discount, per-payment-method breakdown, balance due if any),
+        distinct from the narrow thermal-receipt print template. Had
+        to write this template with old-school, table/float-based CSS
+        only — dompdf doesn't support flexbox, grid, or CSS variables,
+        so it couldn't reuse any of the app's existing modern CSS.
+      - POS's receipt modal now has a third button (Print / **PDF** /
+        New Sale) opening the PDF in a new tab, where the browser's
+        own PDF viewer handles saving or printing it.
+      This closes out Phase 5 entirely.
 
 ### Phase 6 — Sales & Returns
 - [ ] Sales history backed by real records
