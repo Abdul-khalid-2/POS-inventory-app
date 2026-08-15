@@ -400,7 +400,44 @@ items off as we complete them so it always reflects real project status.
         card/wallet portion of a split payment.
       - Both the receipt modal and the printed receipt now show a
         line per payment method actually used, instead of assuming one.
-- [ ] Held/parked orders persisted (not just in-memory)
+- [x] Held/parked orders persisted (not just in-memory) — held orders
+      are now real `Sale` records with `status: held`, not a JS array
+      that vanished on page reload or a crashed tab. This turned out
+      to lean on something already built into the schema back in
+      Phase 1: `sales.status` already included `'held'` as an enum
+      value, anticipating exactly this.
+      - `POST /catalog/sales/hold` parks the cart as a `held` sale +
+        `SaleItems`, with no stock deducted and no `Payment` created —
+        holding commits nothing.
+      - `GET /catalog/sales/held` lists every currently-held order
+        **shop-wide**, not scoped to whoever parked it — a held order
+        is pickable by any cashier (e.g. the one who parked it went on
+        break, or handed off to another terminal).
+      - Resuming re-prices everything **fresh** at the moment of
+        actual checkout — `store()` was extended with an optional
+        `resume_held_sale_id`, and only deletes that held record
+        (guarded to `status: held`, so a stale/bogus id can't touch a
+        real completed sale) *after* the new completed sale exists.
+        Stock and prices are never trusted from whenever the order was
+        originally held.
+      - `SaleController` got refactored to extract shared pricing
+        logic (`priceItems`, `applyDiscountAndTax`,
+        `assertSufficientStock`) so checkout and hold don't duplicate
+        that math — hold skips the stock-sufficiency check entirely
+        (parking a cart shouldn't be blocked by stock at all; only
+        actually charging should be).
+      - `pos.js`'s Held Orders drawer now round-trips through the
+        server. Re-holding an order that was resumed-but-not-charged
+        replaces the original held record instead of leaving a stale
+        duplicate. The product/held-orders lists refresh after a
+        completed checkout so the badge and grid never show
+        pre-checkout state.
+      - **One known, flagged simplification**: a held sale only stores
+        the resulting discount *amount*, not whether it was originally
+        entered as a flat amount or a percentage. On resume, the
+        dollar amount is correctly reapplied (as a flat amount going
+        forward) — the actual discount value carries over exactly,
+        just not the "how it was entered" framing.
 - [ ] Cash register / shift open-close with expected vs counted cash
 - [ ] Receipt generation (print + PDF)
 

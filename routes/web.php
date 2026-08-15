@@ -120,5 +120,11 @@ Route::middleware('auth')->group(function () {
         // The POS checkout endpoint itself — see SaleController for
         // why it only accepts product_id + quantity, never a price.
         Route::post('sales', [SaleApiController::class, 'store'])->name('sales.store');
+
+        // Held/parked orders — persisted, not just in-memory in the
+        // browser tab. See SaleController::hold()/heldIndex().
+        Route::get('sales/held', [SaleApiController::class, 'heldIndex'])->name('sales.held.index');
+        Route::post('sales/hold', [SaleApiController::class, 'hold'])->name('sales.hold');
+        Route::delete('sales/{sale}/held', [SaleApiController::class, 'destroyHeld'])->name('sales.held.destroy');
     });
 });

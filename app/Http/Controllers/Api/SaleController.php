@@ -24,7 +24,8 @@ class SaleController extends Controller implements HasMiddleware
     public static function middleware(): array
     {
         return [
-            new Middleware('module:pos,add', only: ['store']),
+            new Middleware('module:pos,add', only: ['store', 'hold', 'destroyHeld']),
+            new Middleware('module:pos', only: ['heldIndex']),
         ];
     }
 
@@ -34,9 +35,10 @@ class SaleController extends Controller implements HasMiddleware
      * Deliberately does NOT trust any price/total the client sends —
      * only product_id + quantity. Every price, tax amount, and total
      * is computed here from the product's real current sale_price and
-     * tax rate, exactly as it stands at the moment of sale. A client
-     * could send anything for a "price"; only the server's numbers
-     * ever get persisted.
+     * tax rate, exactly as it stands at the moment of sale — including
+     * when this is finalizing a previously-held order: stock and
+     * prices are re-checked fresh right now, not trusted from
+     * whenever the order was originally held.
      *
      * Supports genuine split payments: `payments` is an array of
      * {method, amount} — one Payment row per entry, same polymorphic
@@ -57,6 +59,11 @@ class SaleController extends Controller implements HasMiddleware
             'payments' => ['nullable', 'array'],
             'payments.*.method' => ['required_with:payments', Rule::in(['cash', 'card', 'wallet'])],
             'payments.*.amount' => ['required_with:payments', 'numeric', 'min:0.01'],
+            // Set when this checkout is finalizing a previously-held
+            // order — see hold()/heldIndex() below. Only a sale still
+            // sitting at status=held gets deleted; a bogus/stale id is
+            // silently ignored rather than erroring the whole checkout.
+            'resume_held_sale_id' => ['nullable', 'integer', 'exists:sales,id'],
         ]);
 
         $discountType = $data['discount_type'] ?? 'amount';
@@ -64,57 +71,11 @@ class SaleController extends Controller implements HasMiddleware
         $payments = $data['payments'] ?? [];
 
         [$sale, $stockEffects] = DB::transaction(function () use ($data, $discountType, $discountValue, $payments, $request) {
-            // Lock every product row up front, in a stable (sorted)
-            // order, so two simultaneous checkouts touching overlapping
-            // products can't deadlock each other.
-            $productIds = collect($data['items'])->pluck('product_id')->unique()->sort()->values();
-            $products = Product::with(['tax', 'unit'])->whereIn('id', $productIds)->lockForUpdate()->get()->keyBy('id');
+            ['lines' => $lines, 'subtotal' => $subtotal] = $this->priceItems($data['items'], lock: true);
+            $this->assertSufficientStock($lines);
 
-            $lines = [];
-            $subtotal = 0;
-
-            foreach ($data['items'] as $item) {
-                $product = $products[$item['product_id']];
-                $qty = $item['quantity'];
-
-                if ($qty > $product->current_stock) {
-                    throw ValidationException::withMessages([
-                        'items' => "Not enough stock for {$product->name} — only {$product->current_stock} {$product->unit->short_code} left.",
-                    ]);
-                }
-
-                $unitPrice = (float) $product->sale_price;
-                $lineSubtotal = round($unitPrice * $qty, 2);
-
-                $lines[] = [
-                    'product' => $product,
-                    'quantity' => $qty,
-                    'unit_price' => $unitPrice,
-                    'line_subtotal' => $lineSubtotal,
-                    'tax_rate' => (float) ($product->tax?->rate ?? 0),
-                ];
-                $subtotal += $lineSubtotal;
-            }
-
-            $discountAmount = $discountType === 'percent'
-                ? round($subtotal * min($discountValue, 100) / 100, 2)
-                : round(min($discountValue, $subtotal), 2);
-
-            // Tax is computed per line, on that line's own product's
-            // rate (products have different rates — see docs/erd.md),
-            // with the sale-level discount allocated proportionally
-            // across lines by their share of the subtotal.
-            $taxTotal = 0;
-            foreach ($lines as &$line) {
-                $discountShare = $subtotal > 0 ? ($line['line_subtotal'] / $subtotal) * $discountAmount : 0;
-                $taxableAmount = $line['line_subtotal'] - $discountShare;
-                $line['tax'] = round($taxableAmount * $line['tax_rate'] / 100, 2);
-                $line['line_total'] = round($line['line_subtotal'] + $line['tax'], 2);
-                $taxTotal += $line['tax'];
-            }
-            unset($line);
-
-            $grandTotal = round($subtotal - $discountAmount + $taxTotal, 2);
+            ['lines' => $lines, 'discountAmount' => $discountAmount, 'taxTotal' => $taxTotal, 'grandTotal' => $grandTotal]
+                = $this->applyDiscountAndTax($lines, $subtotal, $discountType, $discountValue);
 
             $paidAmount = round(array_sum(array_column($payments, 'amount')), 2);
 
@@ -199,6 +160,14 @@ class SaleController extends Controller implements HasMiddleware
                 Customer::whereKey($sale->customer_id)->increment('current_balance', $dueAmount);
             }
 
+            // This checkout finalized a held order — the held record
+            // is now superseded by the real completed sale just
+            // created above, so it goes away. Guarded to status=held
+            // so a stale/bogus id can never delete a real sale.
+            if (! empty($data['resume_held_sale_id'])) {
+                Sale::where('id', $data['resume_held_sale_id'])->where('status', 'held')->delete();
+            }
+
             return [$sale, $stockEffects];
         });
 
@@ -212,6 +181,177 @@ class SaleController extends Controller implements HasMiddleware
         return (new SaleResource($sale->load(['customer', 'cashier', 'items.product', 'payments'])))
             ->response()
             ->setStatusCode(201);
+    }
+
+    /**
+     * POST /catalog/sales/hold — parks the current cart as a real,
+     * persisted Sale (status=held) instead of only living in the
+     * browser tab's memory. No stock is deducted and no Payment is
+     * created — holding commits nothing, it's just a durable "save
+     * this cart for later" that survives a page reload, a crashed
+     * tab, or another cashier picking it up on a different terminal.
+     *
+     * Uses the product's *current* price/tax for the persisted total
+     * (so the Held Orders list shows a sensible number), but that
+     * total is provisional — finalizing a held order goes through
+     * store() again, which always re-prices fresh at that moment.
+     */
+    public function hold(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'customer_id' => ['nullable', 'exists:customers,id'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'distinct', 'exists:products,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'discount_type' => ['nullable', Rule::in(['amount', 'percent'])],
+            'discount_value' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        ['lines' => $lines, 'subtotal' => $subtotal] = $this->priceItems($data['items']);
+        ['lines' => $lines, 'discountAmount' => $discountAmount, 'taxTotal' => $taxTotal, 'grandTotal' => $grandTotal]
+            = $this->applyDiscountAndTax($lines, $subtotal, $data['discount_type'] ?? 'amount', $data['discount_value'] ?? 0);
+
+        $sale = DB::transaction(function () use ($data, $lines, $subtotal, $discountAmount, $taxTotal, $grandTotal, $request) {
+            $sale = Sale::create([
+                'invoice_no' => $this->nextInvoiceNo(),
+                'customer_id' => $data['customer_id'] ?? null,
+                'user_id' => $request->user()->id,
+                'sale_date' => now(),
+                'subtotal' => round($subtotal, 2),
+                'discount' => $discountAmount,
+                'tax_total' => round($taxTotal, 2),
+                'grand_total' => $grandTotal,
+                'paid_amount' => 0,
+                'due_amount' => $grandTotal,
+                'payment_status' => 'due',
+                'status' => 'held',
+            ]);
+
+            foreach ($lines as $line) {
+                SaleItem::create([
+                    'sale_id' => $sale->id,
+                    'product_id' => $line['product']->id,
+                    'quantity' => $line['quantity'],
+                    'unit_price' => $line['unit_price'],
+                    'discount' => 0,
+                    'tax' => $line['tax'],
+                    'line_total' => $line['line_total'],
+                ]);
+            }
+
+            return $sale;
+        });
+
+        return (new SaleResource($sale->load(['customer', 'cashier', 'items.product'])))
+            ->response()
+            ->setStatusCode(201);
+    }
+
+    /**
+     * GET /catalog/sales/held — every currently-held order, shop-wide
+     * (not scoped to the current cashier — a held order should be
+     * pickable by any cashier, e.g. if the one who parked it goes on
+     * break or switches terminals).
+     */
+    public function heldIndex(): JsonResponse
+    {
+        $held = Sale::where('status', 'held')
+            ->with(['customer', 'cashier', 'items.product'])
+            ->latest()
+            ->get();
+
+        return SaleResource::collection($held)->response();
+    }
+
+    /**
+     * DELETE /catalog/sales/{sale}/held — discards a held order.
+     * Guarded to status=held so this can never be used to delete a
+     * real completed sale.
+     */
+    public function destroyHeld(Sale $sale): JsonResponse
+    {
+        if ($sale->status !== 'held') {
+            abort(422, 'Only a held order can be deleted this way.');
+        }
+
+        $sale->delete();
+
+        return response()->json(null, 204);
+    }
+
+    /**
+     * Prices a set of {product_id, quantity} lines against each
+     * product's CURRENT sale_price/tax rate. No stock check here —
+     * callers that actually commit stock (store()) call
+     * assertSufficientStock() explicitly afterward; hold() doesn't,
+     * since parking a cart shouldn't be blocked by stock at all.
+     */
+    private function priceItems(array $items, bool $lock = false): array
+    {
+        $productIds = collect($items)->pluck('product_id')->unique()->sort()->values();
+        $query = Product::with(['tax', 'unit'])->whereIn('id', $productIds);
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+        $products = $query->get()->keyBy('id');
+
+        $lines = [];
+        $subtotal = 0;
+
+        foreach ($items as $item) {
+            $product = $products[$item['product_id']];
+            $unitPrice = (float) $product->sale_price;
+            $lineSubtotal = round($unitPrice * $item['quantity'], 2);
+
+            $lines[] = [
+                'product' => $product,
+                'quantity' => $item['quantity'],
+                'unit_price' => $unitPrice,
+                'line_subtotal' => $lineSubtotal,
+                'tax_rate' => (float) ($product->tax?->rate ?? 0),
+            ];
+            $subtotal += $lineSubtotal;
+        }
+
+        return ['lines' => $lines, 'subtotal' => $subtotal];
+    }
+
+    private function assertSufficientStock(array $lines): void
+    {
+        foreach ($lines as $line) {
+            if ($line['quantity'] > $line['product']->current_stock) {
+                throw ValidationException::withMessages([
+                    'items' => "Not enough stock for {$line['product']->name} — only {$line['product']->current_stock} {$line['product']->unit->short_code} left.",
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Allocates a sale-level discount proportionally across lines by
+     * their share of the subtotal, then computes tax per line at that
+     * line's own product's rate (products have different rates — see
+     * docs/erd.md).
+     */
+    private function applyDiscountAndTax(array $lines, float $subtotal, string $discountType, float $discountValue): array
+    {
+        $discountAmount = $discountType === 'percent'
+            ? round($subtotal * min($discountValue, 100) / 100, 2)
+            : round(min($discountValue, $subtotal), 2);
+
+        $taxTotal = 0;
+        foreach ($lines as &$line) {
+            $discountShare = $subtotal > 0 ? ($line['line_subtotal'] / $subtotal) * $discountAmount : 0;
+            $taxableAmount = $line['line_subtotal'] - $discountShare;
+            $line['tax'] = round($taxableAmount * $line['tax_rate'] / 100, 2);
+            $line['line_total'] = round($line['line_subtotal'] + $line['tax'], 2);
+            $taxTotal += $line['tax'];
+        }
+        unset($line);
+
+        $grandTotal = round($subtotal - $discountAmount + $taxTotal, 2);
+
+        return ['lines' => $lines, 'discountAmount' => $discountAmount, 'taxTotal' => $taxTotal, 'grandTotal' => $grandTotal];
     }
 
     /**

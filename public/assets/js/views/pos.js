@@ -1,5 +1,6 @@
-/* POS Terminal View — wired to real /catalog/* endpoints. Held orders
-   stay in-memory for now (persisting them is the next roadmap item). */
+/* POS Terminal View — wired to real /catalog/* endpoints, including
+   held orders, which now persist as real Sale records (status=held)
+   instead of only living in this tab's memory. */
 
 let posState = {
   cart: [],
@@ -9,29 +10,33 @@ let posState = {
   payments: [], // [{method, amount}] — the actual split-payment lines
   activeCategory: 'all',
   search: '',
-  heldOrders: [],
+  resumingHeldSaleId: null, // set while a held order is loaded into the cart
 };
 
 let posProducts = [];
 let posCategories = [];
 let posCustomers = [];
+let posHeldOrders = []; // fetched from the server, not held in a local array between sessions
 
 registerView('pos', async function() {
   breadcrumb([{ label: 'Home', view: 'dashboard' }, { label: 'POS Terminal' }]);
   posState.cart = [];
   posState.discount = 0;
   posState.payments = [];
+  posState.resumingHeldSaleId = null;
 
   document.getElementById('content').innerHTML = simpleLoading();
   try {
-    const [productsRes, categoriesRes, customersRes] = await Promise.all([
+    const [productsRes, categoriesRes, customersRes, heldRes] = await Promise.all([
       apiFetch('/catalog/products?status=active&per_page=1000'),
       apiFetch('/catalog/categories'),
       apiFetch('/catalog/customers'),
+      apiFetch('/catalog/sales/held'),
     ]);
     posProducts = productsRes.data;
     posCategories = categoriesRes.data;
     posCustomers = customersRes.data;
+    posHeldOrders = heldRes.data;
   } catch (e) {
     document.getElementById('content').innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load the POS terminal", e.message);
     return;
@@ -46,7 +51,7 @@ registerView('pos', async function() {
             <input type="text" class="form-control" id="posSearch" placeholder="Search products or scan barcode… (F2)" style="padding-left:34px;" autofocus>
           </div>
           <button class="btn btn-outline-secondary" id="heldOrdersBtn" title="Held Orders (F6)">
-            <i class="bi bi-pause-circle"></i> <span class="badge bg-secondary" id="heldCount">${posState.heldOrders.length}</span>
+            <i class="bi bi-pause-circle"></i> <span class="badge bg-secondary" id="heldCount">${posHeldOrders.length}</span>
           </button>
           <button class="btn btn-outline-secondary d-none d-md-block" id="shortcutInfo" title="Shortcuts">
             <i class="bi bi-keyboard"></i>
@@ -373,17 +378,44 @@ function posKeyHandler(e) {
   if (e.key === 'F9') { e.preventDefault(); holdOrder(); }
 }
 
-function holdOrder() {
+async function holdOrder() {
   if (!posState.cart.length) { showToast('Cart is empty — nothing to hold', 'warning'); return; }
-  const { total } = calcTotals();
-  posState.heldOrders.push({ id: Date.now(), cart: [...posState.cart], customerId: posState.customerId, discount: posState.discount, discountType: posState.discountType, total });
+
+  const payload = {
+    customer_id: posState.customerId || null,
+    items: posState.cart.map(i => ({ product_id: i.productId, quantity: i.qty })),
+    discount_type: posState.discountType,
+    discount_value: posState.discount,
+  };
+
+  const holdBtn = document.getElementById('holdOrderBtn');
+  holdBtn.disabled = true;
+
+  try {
+    // Re-holding an order that was resumed (but never actually
+    // charged) replaces the original held record instead of leaving
+    // a stale duplicate behind.
+    if (posState.resumingHeldSaleId) {
+      await apiFetch(`/catalog/sales/${posState.resumingHeldSaleId}/held`, { method: 'DELETE' }).catch(() => {});
+    }
+    await apiFetch('/catalog/sales/hold', { method: 'POST', body: payload });
+    const heldRes = await apiFetch('/catalog/sales/held');
+    posHeldOrders = heldRes.data;
+  } catch (e) {
+    holdBtn.disabled = false;
+    showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+    return;
+  }
+
+  holdBtn.disabled = false;
   posState.cart = [];
   posState.discount = 0;
   posState.payments = [];
+  posState.resumingHeldSaleId = null;
   document.getElementById('posDiscount').value = 0;
   renderCart();
   renderPaymentsList();
-  document.getElementById('heldCount').textContent = posState.heldOrders.length;
+  document.getElementById('heldCount').textContent = posHeldOrders.length;
   showToast('Order held successfully', 'success');
   renderHeldList();
 }
@@ -402,46 +434,68 @@ function closeHeldDrawer() {
 function renderHeldList() {
   const list = document.getElementById('heldList');
   if (!list) return;
-  if (!posState.heldOrders.length) { list.innerHTML = '<div class="empty-state" style="padding:30px 10px;"><p class="small mb-0">No held orders.</p></div>'; return; }
-  list.innerHTML = posState.heldOrders.map((h, i) => {
-    const customer = posCustomers.find(c => String(c.id) === String(h.customerId));
-    return `
+  if (!posHeldOrders.length) { list.innerHTML = '<div class="empty-state" style="padding:30px 10px;"><p class="small mb-0">No held orders.</p></div>'; return; }
+  list.innerHTML = posHeldOrders.map((h, i) => `
     <div class="cart-item" style="flex-direction:column;align-items:stretch;">
       <div class="d-flex justify-content-between">
-        <span class="fw-600">Held Order #${i + 1}</span>
-        <span class="fw-700">${fmtMoney(h.total)}</span>
+        <span class="fw-600">${h.invoice_no}</span>
+        <span class="fw-700">${fmtMoney(h.grand_total)}</span>
       </div>
-      <div class="small text-muted">${h.cart.length} items &middot; ${customer ? customer.name : 'Walk-in Customer'}</div>
+      <div class="small text-muted">${h.items.length} items &middot; ${h.customer?.name || 'Walk-in Customer'}</div>
       <div class="d-flex gap-2 mt-2">
         <button class="btn btn-soft-success btn-sm flex-grow-1" data-resume="${i}"><i class="bi bi-play-circle me-1"></i>Resume</button>
         <button class="btn btn-soft-danger btn-sm" data-delete-held="${i}"><i class="bi bi-trash"></i></button>
       </div>
-    </div>`;
-  }).join('');
+    </div>`).join('');
+
   list.querySelectorAll('[data-resume]').forEach(b => b.addEventListener('click', () => {
-    const idx = +b.dataset.resume;
-    const held = posState.heldOrders[idx];
-    posState.cart = held.cart;
-    posState.customerId = held.customerId;
+    const held = posHeldOrders[+b.dataset.resume];
+    const cart = [];
+    let skipped = 0;
+
+    held.items.forEach(item => {
+      const product = posProducts.find(p => String(p.id) === String(item.product_id));
+      if (!product) { skipped++; return; } // e.g. deactivated since being held
+      cart.push({ productId: product.id, name: product.name, price: product.sale_price, qty: item.quantity, taxRate: product.tax?.rate || 0, unit: product.unit.short_code, maxStock: product.current_stock });
+    });
+
+    if (skipped > 0) showToast(`${skipped} item(s) from this order are no longer available and were skipped`, 'warning');
+
+    posState.cart = cart;
+    posState.customerId = held.customer?.id ? String(held.customer.id) : '';
+    // The held sale only stores the resulting discount *amount*, not
+    // whether it was originally entered as a flat amount or a % — the
+    // dollar effect carries over correctly either way, so it's
+    // reapplied here as a flat amount.
+    posState.discountType = 'amount';
     posState.discount = held.discount;
-    posState.discountType = held.discountType;
     posState.payments = [];
-    document.getElementById('posCustomer').value = held.customerId;
+    posState.resumingHeldSaleId = held.id;
+
+    document.getElementById('posCustomer').value = posState.customerId;
+    document.getElementById('posDiscountType').value = 'amount';
     document.getElementById('posDiscount').value = held.discount;
-    document.getElementById('posDiscountType').value = held.discountType;
-    posState.heldOrders.splice(idx, 1);
-    document.getElementById('heldCount').textContent = posState.heldOrders.length;
+
     renderCart();
     renderPaymentsList();
     closeHeldDrawer();
     showToast('Held order resumed', 'success');
   }));
+
   list.querySelectorAll('[data-delete-held]').forEach(b => b.addEventListener('click', () => {
-    const idx = +b.dataset.deleteHeld;
-    posState.heldOrders.splice(idx, 1);
-    document.getElementById('heldCount').textContent = posState.heldOrders.length;
-    renderHeldList();
-    showToast('Held order deleted', 'info');
+    const held = posHeldOrders[+b.dataset.deleteHeld];
+    confirmModal('Delete Held Order', `Discard held order <strong>${held.invoice_no}</strong>? This can't be undone.`, async () => {
+      try {
+        await apiFetch(`/catalog/sales/${held.id}/held`, { method: 'DELETE' });
+      } catch (e) {
+        showToast(e.message, 'error');
+        return;
+      }
+      posHeldOrders = posHeldOrders.filter(h => h.id !== held.id);
+      document.getElementById('heldCount').textContent = posHeldOrders.length;
+      renderHeldList();
+      showToast('Held order deleted', 'info');
+    }, 'Delete');
   }));
 }
 
@@ -480,6 +534,7 @@ async function completeSale() {
     discount_type: posState.discountType,
     discount_value: posState.discount,
     payments: posState.payments.map(p => ({ method: p.method, amount: p.amount })),
+    resume_held_sale_id: posState.resumingHeldSaleId || undefined,
   };
 
   const chargeBtn = document.getElementById('chargeBtn');
@@ -501,16 +556,24 @@ async function completeSale() {
   posState.cart = [];
   posState.discount = 0;
   posState.payments = [];
+  posState.resumingHeldSaleId = null;
   renderCart();
   renderPaymentsList();
 
-  // Stock just changed server-side — refresh the grid so quantities
-  // (and out-of-stock styling) reflect what actually happened.
+  // Stock just changed server-side, and if this finalized a held
+  // order it's now been deleted server-side too — refresh both so
+  // the grid and the held-orders badge/drawer reflect what actually
+  // happened, not stale pre-checkout state.
   try {
-    const refreshed = await apiFetch('/catalog/products?status=active&per_page=1000');
-    posProducts = refreshed.data;
+    const [refreshedProducts, refreshedHeld] = await Promise.all([
+      apiFetch('/catalog/products?status=active&per_page=1000'),
+      apiFetch('/catalog/sales/held'),
+    ]);
+    posProducts = refreshedProducts.data;
+    posHeldOrders = refreshedHeld.data;
     renderPOSProducts();
-  } catch (e) { /* non-critical — grid just stays stale until next navigation */ }
+    document.getElementById('heldCount').textContent = posHeldOrders.length;
+  } catch (e) { /* non-critical — grid/badge just stay stale until next navigation */ }
 }
 
 function showSaleReceipt(sale, change) {
