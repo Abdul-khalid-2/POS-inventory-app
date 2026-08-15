@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\StockMovementResource;
 use App\Models\Product;
 use App\Models\StockMovement;
+use App\Services\StockNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -67,11 +68,12 @@ class StockAdjustmentController extends Controller implements HasMiddleware
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $movement = DB::transaction(function () use ($data, $request) {
+        [$movement, $previousStock, $newBalance] = DB::transaction(function () use ($data, $request) {
             $product = Product::whereKey($data['product_id'])->lockForUpdate()->firstOrFail();
+            $previousStock = $product->current_stock;
 
             $delta = $data['type'] === 'increase' ? $data['quantity'] : -$data['quantity'];
-            $newBalance = $product->current_stock + $delta;
+            $newBalance = $previousStock + $delta;
 
             if ($newBalance < 0) {
                 throw ValidationException::withMessages([
@@ -81,7 +83,7 @@ class StockAdjustmentController extends Controller implements HasMiddleware
 
             $product->update(['current_stock' => $newBalance]);
 
-            return StockMovement::create([
+            $movement = StockMovement::create([
                 'product_id' => $product->id,
                 'type' => $data['type'] === 'increase' ? 'adjustment_in' : 'adjustment_out',
                 'quantity' => $data['quantity'],
@@ -90,7 +92,18 @@ class StockAdjustmentController extends Controller implements HasMiddleware
                 'notes' => $data['notes'] ?? null,
                 'user_id' => $request->user()->id,
             ]);
+
+            return [$movement, $previousStock, $newBalance];
         });
+
+        // Fired after the transaction commits, not inside it — a
+        // notification is a side effect, not part of the data
+        // integrity the transaction is protecting.
+        StockNotifier::checkThresholds(
+            Product::with('unit')->find($data['product_id']),
+            $previousStock,
+            $newBalance,
+        );
 
         return (new StockMovementResource($movement->load(['product.unit', 'user'])))
             ->response()

@@ -7,6 +7,7 @@ use App\Http\Resources\ProductResource;
 use App\Models\Category;
 use App\Models\Product;
 use App\Services\ProductCodeGenerator;
+use App\Services\StockNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -99,8 +100,14 @@ class ProductController extends Controller implements HasMiddleware
         $data = $this->validated($request);
 
         $product = Product::create($data);
+        $product->load(['category', 'brand', 'unit', 'tax']);
 
-        return (new ProductResource($product->load(['category', 'brand', 'unit', 'tax'])))
+        // A product can be created already at/below its reorder level
+        // (or with zero opening stock) — worth notifying on immediately,
+        // not just waiting for the first adjustment to trigger it.
+        StockNotifier::checkThresholds($product, PHP_INT_MAX, $product->current_stock);
+
+        return (new ProductResource($product))
             ->response()
             ->setStatusCode(201);
     }

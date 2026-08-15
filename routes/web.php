@@ -3,6 +3,7 @@
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\NotificationController as NotificationApiController;
 use App\Http\Controllers\Api\ProductController as ProductApiController;
 use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\TaxController;
@@ -104,5 +105,10 @@ Route::middleware('auth')->group(function () {
         // stock_movements row.
         Route::get('stock-adjustments', [StockAdjustmentController::class, 'index'])->name('stock-adjustments.index');
         Route::post('stock-adjustments', [StockAdjustmentController::class, 'store'])->name('stock-adjustments.store');
+
+        // Shared, shop-wide notification feed — see NotificationController.
+        Route::get('notifications', [NotificationApiController::class, 'index'])->name('notifications.index');
+        Route::post('notifications/read-all', [NotificationApiController::class, 'markAllRead'])->name('notifications.read-all');
+        Route::post('notifications/{notification}/read', [NotificationApiController::class, 'markRead'])->name('notifications.read');
     });
 });

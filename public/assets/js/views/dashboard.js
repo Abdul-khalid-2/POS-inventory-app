@@ -11,8 +11,6 @@ registerView('dashboard', function() {
     return sum + s.total - cogs - s.tax;
   }, 0);
   const totalOrders = SALES.length;
-  const lowStockItems = PRODUCTS.filter(p => p.stock > 0 && p.stock <= p.reorder);
-  const outOfStockItems = PRODUCTS.filter(p => p.stock <= 0);
   const totalCustomers = CUSTOMERS.length - 1;
   const totalDue = CUSTOMERS.reduce((s, c) => s + c.due, 0);
   const totalPayable = SUPPLIERS.reduce((s, sup) => s + sup.payable, 0);
@@ -35,7 +33,15 @@ registerView('dashboard', function() {
       ${kpiCard("Today's Sales", fmtMoney(todaySales), 'up', '12.5%', 'bi-cash-stack', 'success')}
       ${kpiCard("Today's Profit", fmtMoney(todayProfit), 'up', '8.2%', 'bi-graph-up-arrow', 'primary')}
       ${kpiCard("Total Orders", totalOrders, 'up', '5.1%', 'bi-receipt', 'info')}
-      ${kpiCard("Low Stock Items", lowStockItems.length + outOfStockItems.length, 'down', '3 items', 'bi-exclamation-triangle', 'warning')}
+      <div class="col-6 col-md-4 col-xl-3">
+        <div class="kpi-card">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <div class="kpi-icon bg-soft-warning"><i class="bi bi-exclamation-triangle"></i></div>
+          </div>
+          <div class="kpi-label">Low Stock Items</div>
+          <div class="kpi-value" id="kpiLowStockValue"><span class="spinner-border spinner-border-sm text-warning"></span></div>
+        </div>
+      </div>
       ${kpiCard("Total Customers", totalCustomers, 'up', '2 new', 'bi-people', 'primary')}
       ${kpiCard("Total Due (Receivable)", fmtMoney(totalDue), 'down', '2.3%', 'bi-cash-coin', 'danger')}
       ${kpiCard("Total Payable", fmtMoney(totalPayable), 'down', '1.8%', 'bi-credit-card', 'danger')}
@@ -107,23 +113,8 @@ registerView('dashboard', function() {
             Low Stock Alerts
             <a href="#" class="small text-decoration-none" data-nav="inventory">View all</a>
           </div>
-          <div class="card-body">
-            ${(() => {
-              const items = [...lowStockItems, ...outOfStockItems].slice(0, 6);
-              if (!items.length) return emptyState('bi-check-circle', 'All stocked up!', 'No low stock items at the moment.');
-              return items.map(p => `
-                <div class="d-flex align-items-center gap-3 py-2 border-bottom">
-                  <div class="product-thumb">${p.image || '📦'}</div>
-                  <div class="flex-grow-1">
-                    <div class="fw-600">${p.name}</div>
-                    <div class="small text-muted">Reorder at ${p.reorder} ${p.unit}</div>
-                  </div>
-                  <div class="text-end">
-                    <div class="${p.stock <= 0 ? 'text-danger' : 'text-warning'} fw-700">${p.stock} ${p.unit}</div>
-                    <button class="btn btn-soft-warning btn-sm mt-1" data-restock="${p.id}"><i class="bi bi-plus-circle me-1"></i>Restock</button>
-                  </div>
-                </div>`).join('');
-            })()}
+          <div class="card-body" id="lowStockAlertsBody">
+            <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading…</div>
           </div>
         </div>
       </div>
@@ -148,11 +139,60 @@ registerView('dashboard', function() {
   document.querySelector('[data-nav="pos"]')?.addEventListener('click', e => { e.preventDefault(); navigateTo('pos'); });
   document.querySelectorAll('[data-nav]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); navigateTo(el.dataset.nav); }));
   document.getElementById('refreshDash')?.addEventListener('click', () => { showToast('Dashboard refreshed', 'success'); navigateTo('dashboard'); });
-  document.querySelectorAll('[data-restock]').forEach(btn => btn.addEventListener('click', () => showToast('Restock order initiated for ' + productName(btn.dataset.restock), 'success')));
   document.querySelectorAll('[data-sale-detail]').forEach(tr => tr.addEventListener('click', () => { if (VIEWS.sales) { navigateTo('sales'); setTimeout(() => window.showSaleDetail?.(tr.dataset.saleDetail), 200); } }));
 
   renderDashboardCharts();
+  loadLowStockWidgets();
 });
+
+/**
+ * The rest of this dashboard is still mock data (Sales/Purchases/
+ * Accounts aren't wired up yet), but stock levels are real as of
+ * Phase 4 — so this patches in the Low Stock KPI and the Low Stock
+ * Alerts card with live data after the rest of the page has already
+ * rendered, rather than blocking the whole dashboard on this one fetch.
+ */
+async function loadLowStockWidgets() {
+  let products;
+  try {
+    const result = await apiFetch('/catalog/products?status=active&per_page=1000');
+    products = result.data;
+  } catch (e) {
+    const kpi = document.getElementById('kpiLowStockValue');
+    if (kpi) kpi.innerHTML = '—';
+    const body = document.getElementById('lowStockAlertsBody');
+    if (body) body.innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load stock data", e.message);
+    return;
+  }
+
+  const lowStock = products.filter(p => p.current_stock > 0 && p.current_stock <= p.reorder_level);
+  const outStock = products.filter(p => p.current_stock <= 0);
+
+  const kpi = document.getElementById('kpiLowStockValue');
+  if (kpi) kpi.textContent = lowStock.length + outStock.length;
+
+  const body = document.getElementById('lowStockAlertsBody');
+  if (!body) return; // user already navigated away
+
+  const items = [...outStock, ...lowStock].slice(0, 6);
+  if (!items.length) {
+    body.innerHTML = emptyState('bi-check-circle', 'All stocked up!', 'No low stock items at the moment.');
+    return;
+  }
+  body.innerHTML = items.map(p => `
+    <div class="d-flex align-items-center gap-3 py-2 border-bottom">
+      ${productThumb(p)}
+      <div class="flex-grow-1">
+        <div class="fw-600">${p.name}</div>
+        <div class="small text-muted">Reorder at ${p.reorder_level} ${p.unit.short_code}</div>
+      </div>
+      <div class="text-end">
+        <div class="${p.current_stock <= 0 ? 'text-danger' : 'text-warning'} fw-700">${p.current_stock} ${p.unit.short_code}</div>
+        <button class="btn btn-soft-warning btn-sm mt-1" data-restock="${p.id}"><i class="bi bi-plus-circle me-1"></i>Adjust</button>
+      </div>
+    </div>`).join('');
+  body.querySelectorAll('[data-restock]').forEach(btn => btn.addEventListener('click', () => navigateTo('inventory')));
+}
 
 function kpiCard(label, value, trend, change, icon, color) {
   return `<div class="col-6 col-md-4 col-xl-3">

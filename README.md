@@ -278,7 +278,41 @@ items off as we complete them so it always reflects real project status.
       step), are now fully live — including a `balance_after` column
       the old mock never had, since the mock had no reliable way to
       keep a running balance consistent across edits.
-- [ ] Low-stock / out-of-stock triggers feeding the dashboard + notifications
+- [x] Low-stock / out-of-stock triggers feeding the dashboard + notifications
+      — three pieces:
+      1. **`StockNotifier` service** — fires a real notification when a
+         product's stock *crosses into* low or out-of-stock territory
+         (not on every subsequent change while it stays there, which
+         would spam a fresh notification on every small adjustment to
+         an already-low product). Hooked into the two places
+         `current_stock` can actually change: `ProductController::store`
+         (a product created already at/below its reorder level) and
+         `StockAdjustmentController::store` (fired *after* that
+         transaction commits, not inside it — a notification is a side
+         effect, not part of the data integrity the transaction protects).
+      2. **Real notifications backend** — new `app_notifications` table
+         (deliberately *not* named `notifications`: Laravel's own
+         built-in notification system reserves that table name with an
+         incompatible schema, so this avoids a future collision if the
+         app ever adopts `Notifiable` for something else, e.g. queued
+         emails). `NotificationController` (`GET /catalog/notifications`,
+         `POST .../{id}/read`, `POST .../read-all`) — no module
+         permission gating, matching the existing decision that
+         Notifications has no `role_permissions` entry and is open to
+         any authenticated user. The topbar's notification bell
+         (`app.js`) now reads from this instead of the `NOTIFICATIONS`
+         mock — first real-data screen-independent piece of the UI to
+         go live outside a specific screen.
+      3. **Dashboard**: the Low Stock KPI card and Low Stock Alerts
+         widget are now real, patched in asynchronously after the rest
+         of the (still-mock) dashboard renders — the rest of the
+         dashboard depends on Sales/Purchases/Accounts, none of which
+         exist yet, so wiring only these two pieces now (rather than
+         the whole page) keeps this scoped to what the checklist item
+         actually asks for. The "Restock" button now honestly routes
+         to Inventory's real Adjust Stock flow instead of faking a
+         purchase order (that's a Phase 7 feature).
+      This closes out Phase 4.
 
 ### Phase 5 — POS Terminal (core business logic)
 - [ ] Real checkout flow: cart → payment → sale record → stock deduction

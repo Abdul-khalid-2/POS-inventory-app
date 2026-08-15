@@ -109,26 +109,39 @@ function openSidebar() {
   document.getElementById('sidebarOverlay').classList.add('show');
 }
 
-function renderNotifDropdown() {
+async function renderNotifDropdown() {
   const dd = document.getElementById('notifDropdown');
-  const unread = NOTIFICATIONS.filter(n => !n.read).length;
+  let result;
+  try {
+    result = await apiFetch('/catalog/notifications?per_page=6');
+  } catch (e) {
+    dd.innerHTML = `<div class="p-3 text-muted small">Couldn't load notifications.</div>`;
+    return;
+  }
+
+  const unread = result.unread_count;
   document.getElementById('notifBadge').textContent = unread;
   document.getElementById('notifBadge').style.display = unread > 0 ? '' : 'none';
+
   let html = `<div class="notif-header"><span>Notifications</span><span class="badge bg-soft-primary">${unread} new</span></div><div class="notif-body">`;
-  NOTIFICATIONS.slice(0, 6).forEach(n => {
-    html += `<div class="notif-item ${n.read ? '' : 'unread'}" data-notif="${n.id}">
+  if (!result.data.length) {
+    html += `<div class="p-3 text-muted small text-center">No notifications yet.</div>`;
+  }
+  result.data.forEach(n => {
+    html += `<div class="notif-item ${n.is_read ? '' : 'unread'}" data-notif="${n.id}">
       <div class="notif-icon bg-soft-${n.color}"><i class="bi ${n.icon}"></i></div>
-      <div><div class="notif-text fw-600">${n.title}</div><div class="notif-text">${n.message}</div><div class="notif-time">${n.time}</div></div>
+      <div><div class="notif-text fw-600">${n.title}</div><div class="notif-text">${n.message}</div><div class="notif-time">${n.time_ago}</div></div>
     </div>`;
   });
   html += `</div><div class="notif-footer"><a href="#" class="text-decoration-none fw-600" id="viewAllNotifs">View all notifications</a></div>`;
   dd.innerHTML = html;
   document.getElementById('viewAllNotifs')?.addEventListener('click', e => { e.preventDefault(); navigateTo('notifications'); });
   dd.querySelectorAll('.notif-item').forEach(it => {
-    it.addEventListener('click', () => {
-      const id = it.dataset.notif;
-      const n = NOTIFICATIONS.find(x => x.id === id);
-      if (n) { n.read = true; renderNotifDropdown(); }
+    it.addEventListener('click', async () => {
+      try {
+        await apiFetch(`/catalog/notifications/${it.dataset.notif}/read`, { method: 'POST' });
+      } catch (e) { /* non-critical — dropdown will just re-show it as unread next open */ }
+      renderNotifDropdown();
     });
   });
 }
