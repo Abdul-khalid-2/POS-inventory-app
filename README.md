@@ -315,8 +315,65 @@ items off as we complete them so it always reflects real project status.
       This closes out Phase 4.
 
 ### Phase 5 — POS Terminal (core business logic)
-- [ ] Real checkout flow: cart → payment → sale record → stock deduction
-- [ ] Split payments, discounts, tax calculation
+- [x] Real checkout flow: cart → payment → sale record → stock deduction
+      — `SaleController::store` (`POST /catalog/sales`) is the real
+      checkout endpoint. Key design decision: it accepts **only**
+      `product_id` + `quantity` per line — never a price or total from
+      the client. Every price, tax amount, and total is computed
+      server-side from the product's actual current `sale_price` and
+      tax rate at the moment of sale; a tampered or stale client-side
+      number can't affect what actually gets charged or recorded. Also
+      landed in this pass:
+      - **Discounts + tax calculation** — a sale-level discount
+        (flat amount or %) is allocated proportionally across line
+        items by their share of the subtotal, then tax is computed per
+        line at *that product's own rate* (products have different
+        rates — see `docs/erd.md`). `pos.js`'s live cart preview
+        mirrors this exact math client-side, so what the cashier sees
+        before charging matches what the server actually charges after.
+      - **Stock deduction with oversell protection** — every product
+        row involved gets locked (`lockForUpdate`, in a stable sorted
+        order to avoid deadlocking two simultaneous checkouts) inside
+        one transaction; a line that asks for more than
+        `current_stock` fails the whole sale with a clear 422 instead
+        of silently overselling. Real `stock_movements` rows
+        (`sale_out`) are written, and the Phase 4 `StockNotifier`
+        fires automatically if this sale crosses a product into
+        low/out-of-stock — checkout is now a real trigger for that
+        system, not just manual adjustments.
+      - **Credit sales** — `payment_method: 'credit'` records the sale
+        with `due_amount = grand_total` and no `Payment` row, and
+        (for a real, non-walk-in customer) adds that amount to
+        `customers.current_balance` — the schema already had this
+        column for exactly this purpose since Phase 1.
+      - **Two small read-only endpoints added because checkout
+        genuinely needed them**, not full features on their own:
+        `GET /catalog/customers` (POS needs real customer IDs to
+        attach to a sale; full customer management is Phase 8) and
+        the `SaleResource`/receipt shape. Same pattern as the Tax
+        endpoint added in Phase 3 for the same reason.
+      - **`pos.js` rewritten**: real products/categories/customers on
+        load, live stock guards when adding to cart (can't add more
+        than what's in stock), the receipt modal now renders from the
+        server's actual response instead of a locally-guessed total,
+        and the product grid refetches after a sale so quantities
+        reflect what really happened.
+      - **Known, flagged limitation**: `nextInvoiceNo()` loads every
+        existing invoice number into memory to find the highest one —
+        fine at today's scale, but noted in a code comment as
+        something to revisit with a real sequence if the sales table
+        grows large.
+      **Deliberately NOT done here** (each is its own upcoming item):
+      splitting one sale's payment across multiple methods (a sale is
+      currently one method, paid in full, or credit), persisting held
+      orders (still in-memory), cash register shift integration, and
+      PDF receipts (print-to-browser only, same as before).
+- [ ] Split payments, discounts, tax calculation — discounts and tax
+      calculation are done (see above); what's left here is genuinely
+      just splitting one sale's payment across multiple methods (e.g.
+      part cash, part card), which the current schema already supports
+      structurally (`payments` allows multiple rows per sale via its
+      polymorphic relation) but `SaleController` doesn't accept yet.
 - [ ] Held/parked orders persisted (not just in-memory)
 - [ ] Cash register / shift open-close with expected vs counted cash
 - [ ] Receipt generation (print + PDF)

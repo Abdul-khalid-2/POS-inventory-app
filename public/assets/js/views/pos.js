@@ -1,22 +1,40 @@
-/* POS Terminal View */
+/* POS Terminal View — wired to real /catalog/* endpoints. Held orders
+   stay in-memory for now (persisting them is the next roadmap item). */
 
 let posState = {
   cart: [],
-  customerId: 'c001',
+  customerId: '', // '' = walk-in (customer_id: null)
   discount: 0,
   discountType: 'amount',
   paymentMethod: 'cash',
-  amountTendered: 0,
   activeCategory: 'all',
   search: '',
   heldOrders: [],
 };
 
-registerView('pos', function() {
+let posProducts = [];
+let posCategories = [];
+let posCustomers = [];
+
+registerView('pos', async function() {
   breadcrumb([{ label: 'Home', view: 'dashboard' }, { label: 'POS Terminal' }]);
   posState.cart = [];
   posState.discount = 0;
-  posState.amountTendered = 0;
+
+  document.getElementById('content').innerHTML = simpleLoading();
+  try {
+    const [productsRes, categoriesRes, customersRes] = await Promise.all([
+      apiFetch('/catalog/products?status=active&per_page=1000'),
+      apiFetch('/catalog/categories'),
+      apiFetch('/catalog/customers'),
+    ]);
+    posProducts = productsRes.data;
+    posCategories = categoriesRes.data;
+    posCustomers = customersRes.data;
+  } catch (e) {
+    document.getElementById('content').innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load the POS terminal", e.message);
+    return;
+  }
 
   const html = `
     <div class="pos-layout">
@@ -27,7 +45,7 @@ registerView('pos', function() {
             <input type="text" class="form-control" id="posSearch" placeholder="Search products or scan barcode… (F2)" style="padding-left:34px;" autofocus>
           </div>
           <button class="btn btn-outline-secondary" id="heldOrdersBtn" title="Held Orders (F6)">
-            <i class="bi bi-pause-circle"></i> <span class="badge bg-secondary" id="heldCount">0</span>
+            <i class="bi bi-pause-circle"></i> <span class="badge bg-secondary" id="heldCount">${posState.heldOrders.length}</span>
           </button>
           <button class="btn btn-outline-secondary d-none d-md-block" id="shortcutInfo" title="Shortcuts">
             <i class="bi bi-keyboard"></i>
@@ -35,7 +53,7 @@ registerView('pos', function() {
         </div>
         <div class="pos-cat-tabs" id="posCatTabs">
           <button class="pos-cat-tab active" data-cat="all">All</button>
-          ${CATEGORIES.map(c => `<button class="pos-cat-tab" data-cat="${c.id}">${c.name}</button>`).join('')}
+          ${posCategories.map(c => `<button class="pos-cat-tab" data-cat="${c.id}">${c.name}</button>`).join('')}
         </div>
         <div class="pos-product-grid" id="posProductGrid"></div>
       </div>
@@ -58,7 +76,8 @@ registerView('pos', function() {
           <div class="mb-2">
             <label class="form-label small fw-600 mb-1">Customer</label>
             <select class="form-select form-select-sm" id="posCustomer">
-              ${CUSTOMERS.map(c => `<option value="${c.id}" ${c.id === 'c001' ? 'selected' : ''}>${c.name}${c.id === 'c001' ? ' (default)' : ''}</option>`).join('')}
+              <option value="">Walk-in Customer</option>
+              ${posCustomers.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
             </select>
           </div>
           <div class="row g-2 mb-2">
@@ -73,7 +92,7 @@ registerView('pos', function() {
               </div>
             </div>
             <div class="col-5">
-              <label class="form-label small fw-600 mb-1">Tax (5%)</label>
+              <label class="form-label small fw-600 mb-1">Tax</label>
               <input type="text" class="form-control form-control-sm" id="posTax" readonly value="${CURRENCY}0.00">
             </div>
           </div>
@@ -98,6 +117,9 @@ registerView('pos', function() {
               <label class="form-label small fw-600 mb-1">Change</label>
               <input type="text" class="form-control form-control-sm" id="posChange" readonly value="${CURRENCY}0.00">
             </div>
+          </div>
+          <div class="small text-muted mb-2" id="creditNote" style="display:none;">
+            <i class="bi bi-info-circle me-1"></i>No payment collected — the full total is added to this customer's balance.
           </div>
           <div class="d-flex gap-2">
             <button class="btn btn-outline-secondary flex-grow-1" id="holdOrderBtn"><i class="bi bi-pause-circle me-1"></i>Hold</button>
@@ -128,19 +150,19 @@ registerView('pos', function() {
 
 function renderPOSProducts() {
   const grid = document.getElementById('posProductGrid');
-  let items = PRODUCTS.filter(p => p.status === 'active');
-  if (posState.activeCategory !== 'all') items = items.filter(p => p.category === posState.activeCategory);
+  let items = posProducts;
+  if (posState.activeCategory !== 'all') items = items.filter(p => String(p.category?.id) === String(posState.activeCategory));
   if (posState.search) {
     const q = posState.search.toLowerCase();
-    items = items.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.barcode.includes(q));
+    items = items.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.barcode || '').includes(q));
   }
   if (!items.length) { grid.innerHTML = emptyState('bi-search', 'No products found', 'Try a different search or category.'); return; }
   grid.innerHTML = items.map(p => `
-    <div class="pos-product-card ${p.stock <= 0 ? 'out-of-stock' : ''}" data-product="${p.id}">
-      <div class="pos-product-img">${p.image || '📦'}</div>
+    <div class="pos-product-card ${p.current_stock <= 0 ? 'out-of-stock' : ''}" data-product="${p.id}">
+      <div class="pos-product-img">${p.image_url ? `<img src="${p.image_url}" style="width:100%;height:100%;object-fit:cover;">` : '<i class="bi bi-box-seam"></i>'}</div>
       <div class="pos-product-name">${p.name}</div>
-      <div class="pos-product-price">${fmtMoney(p.price)}</div>
-      <div class="pos-product-stock">${p.stock <= 0 ? 'Out of stock' : p.stock + ' ' + p.unit + ' left'}</div>
+      <div class="pos-product-price">${fmtMoney(p.sale_price)}</div>
+      <div class="pos-product-stock">${p.current_stock <= 0 ? 'Out of stock' : p.current_stock + ' ' + p.unit.short_code + ' left'}</div>
     </div>`).join('');
   grid.querySelectorAll('.pos-product-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -151,11 +173,15 @@ function renderPOSProducts() {
 }
 
 function addToCart(productId) {
-  const p = productById(productId);
+  const p = posProducts.find(x => String(x.id) === String(productId));
   if (!p) return;
-  const existing = posState.cart.find(i => i.productId === productId);
-  if (existing) existing.qty++;
-  else posState.cart.push({ productId, name: p.name, price: p.price, qty: 1 });
+  const existing = posState.cart.find(i => String(i.productId) === String(productId));
+  if (existing) {
+    if (existing.qty >= p.current_stock) { showToast(`Only ${p.current_stock} ${p.unit.short_code} in stock`, 'warning'); return; }
+    existing.qty++;
+  } else {
+    posState.cart.push({ productId: p.id, name: p.name, price: p.sale_price, qty: 1, taxRate: p.tax?.rate || 0, unit: p.unit.short_code, maxStock: p.current_stock });
+  }
   renderCart();
 }
 
@@ -179,21 +205,40 @@ function renderCart() {
         <div class="cart-item-total">${fmtMoney(item.price * item.qty)}</div>
         <button class="icon-btn danger" data-remove="${i}"><i class="bi bi-x-lg"></i></button>
       </div>`).join('');
-    container.querySelectorAll('[data-qty-inc]').forEach(b => b.addEventListener('click', () => { posState.cart[+b.dataset.qtyInc].qty++; renderCart(); }));
+    container.querySelectorAll('[data-qty-inc]').forEach(b => b.addEventListener('click', () => {
+      const i = +b.dataset.qtyInc;
+      const item = posState.cart[i];
+      if (item.qty >= item.maxStock) { showToast(`Only ${item.maxStock} ${item.unit} in stock`, 'warning'); return; }
+      item.qty++;
+      renderCart();
+    }));
     container.querySelectorAll('[data-qty-dec]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.qtyDec; if (posState.cart[i].qty > 1) posState.cart[i].qty--; else posState.cart.splice(i, 1); renderCart(); }));
     container.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { posState.cart.splice(+b.dataset.remove, 1); renderCart(); }));
   }
   updateTotals();
 }
 
+/**
+ * Mirrors the server's checkout math exactly (proportional discount
+ * allocation across lines, per-line tax at that product's own rate) —
+ * this is only ever a preview; the actual charge is always computed
+ * authoritatively server-side in SaleController::store from
+ * product_id + quantity alone, never from anything calculated here.
+ */
 function calcTotals() {
   const subtotal = posState.cart.reduce((s, i) => s + i.price * i.qty, 0);
   let discount = 0;
   if (posState.discountType === 'amount') discount = Math.min(posState.discount, subtotal);
-  else discount = +(subtotal * (posState.discount / 100)).toFixed(2);
-  const taxable = subtotal - discount;
-  const tax = +(taxable * 0.05).toFixed(2);
-  const total = +(taxable + tax).toFixed(2);
+  else discount = +(subtotal * Math.min(posState.discount, 100) / 100).toFixed(2);
+
+  let tax = 0;
+  posState.cart.forEach(item => {
+    const lineSubtotal = item.price * item.qty;
+    const share = subtotal > 0 ? (lineSubtotal / subtotal) * discount : 0;
+    tax += (lineSubtotal - share) * (item.taxRate / 100);
+  });
+  tax = +tax.toFixed(2);
+  const total = +(subtotal - discount + tax).toFixed(2);
   return { subtotal, discount, tax, total };
 }
 
@@ -231,8 +276,8 @@ function attachPOSEvents() {
     document.querySelectorAll('.payment-tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     posState.paymentMethod = t.dataset.method;
-    const cashRow = document.getElementById('cashPaymentRow');
-    cashRow.style.display = (t.dataset.method === 'cash') ? '' : 'none';
+    document.getElementById('cashPaymentRow').style.display = (t.dataset.method === 'cash') ? '' : 'none';
+    document.getElementById('creditNote').style.display = (t.dataset.method === 'credit') ? '' : 'none';
   }));
 
   document.getElementById('clearCart').addEventListener('click', () => {
@@ -248,7 +293,6 @@ function attachPOSEvents() {
 
   document.getElementById('chargeBtn').addEventListener('click', completeSale);
 
-  // Keyboard shortcuts
   document.addEventListener('keydown', posKeyHandler);
 }
 
@@ -288,18 +332,21 @@ function renderHeldList() {
   const list = document.getElementById('heldList');
   if (!list) return;
   if (!posState.heldOrders.length) { list.innerHTML = '<div class="empty-state" style="padding:30px 10px;"><p class="small mb-0">No held orders.</p></div>'; return; }
-  list.innerHTML = posState.heldOrders.map((h, i) => `
+  list.innerHTML = posState.heldOrders.map((h, i) => {
+    const customer = posCustomers.find(c => String(c.id) === String(h.customerId));
+    return `
     <div class="cart-item" style="flex-direction:column;align-items:stretch;">
       <div class="d-flex justify-content-between">
         <span class="fw-600">Held Order #${i + 1}</span>
         <span class="fw-700">${fmtMoney(h.total)}</span>
       </div>
-      <div class="small text-muted">${h.cart.length} items · ${customerName(h.customerId)}</div>
+      <div class="small text-muted">${h.cart.length} items &middot; ${customer ? customer.name : 'Walk-in Customer'}</div>
       <div class="d-flex gap-2 mt-2">
         <button class="btn btn-soft-success btn-sm flex-grow-1" data-resume="${i}"><i class="bi bi-play-circle me-1"></i>Resume</button>
         <button class="btn btn-soft-danger btn-sm" data-delete-held="${i}"><i class="bi bi-trash"></i></button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   list.querySelectorAll('[data-resume]').forEach(b => b.addEventListener('click', () => {
     const idx = +b.dataset.resume;
     const held = posState.heldOrders[idx];
@@ -335,64 +382,87 @@ function showShortcuts() {
     </table>`, `<button class="btn btn-primary" data-bs-dismiss="modal">Got it</button>`);
 }
 
-function completeSale() {
+async function completeSale() {
   if (!posState.cart.length) { showToast('Cart is empty — add products first', 'warning'); return; }
-  const { subtotal, discount, tax, total } = calcTotals();
-  if (posState.paymentMethod === 'cash') {
-    const tendered = parseFloat(document.getElementById('posTendered').value) || 0;
-    if (tendered < total) { showToast('Insufficient cash tendered', 'error'); return; }
+
+  const { total } = calcTotals();
+  const tendered = parseFloat(document.getElementById('posTendered').value) || 0;
+  if (posState.paymentMethod === 'cash' && tendered < total) {
+    showToast('Insufficient cash tendered', 'error');
+    return;
   }
-  const change = Math.max(0, (parseFloat(document.getElementById('posTendered').value) || 0) - total);
-  const invoice = 'INV-' + (1000 + SALES.length + 1);
-  const customer = CUSTOMERS.find(c => c.id === posState.customerId) || CUSTOMERS[0];
 
-  const successHtml = `
-    <div class="text-center py-3">
-      <div class="kpi-icon mx-auto mb-3 bg-soft-success" style="width:64px;height:64px;font-size:32px;"><i class="bi bi-check-lg"></i></div>
-      <h4 class="fw-700">Sale Completed!</h4>
-      <p class="text-muted">Invoice ${invoice}</p>
-      <div class="row text-start mt-4">
-        <div class="col-6"><div class="text-muted small">Customer</div><div class="fw-600">${customer.name}</div></div>
-        <div class="col-6 text-end"><div class="text-muted small">Date</div><div class="fw-600">${new Date().toLocaleDateString()}</div></div>
-        <div class="col-6 mt-2"><div class="text-muted small">Items</div><div class="fw-600">${posState.cart.reduce((s,i)=>s+i.qty,0)}</div></div>
-        <div class="col-6 mt-2 text-end"><div class="text-muted small">Payment</div><div class="fw-600 text-capitalize">${posState.paymentMethod}</div></div>
-        <div class="col-12 mt-3"><hr></div>
-        <div class="col-6"><div class="text-muted small">Subtotal</div><div class="fw-600">${fmtMoney(subtotal)}</div></div>
-        <div class="col-6 text-end"><div class="text-muted small">Discount</div><div class="fw-600">-${fmtMoney(discount)}</div></div>
-        <div class="col-6 mt-1"><div class="text-muted small">Tax</div><div class="fw-600">${fmtMoney(tax)}</div></div>
-        <div class="col-6 mt-1 text-end"><div class="text-muted small">Total</div><div class="fw-700 fs-5">${fmtMoney(total)}</div></div>
-        ${posState.paymentMethod === 'cash' ? `<div class="col-6 mt-1"><div class="text-muted small">Tendered</div><div class="fw-600">${fmtMoney(parseFloat(document.getElementById('posTendered').value)||0)}</div></div><div class="col-6 mt-1 text-end"><div class="text-muted small">Change</div><div class="fw-600 text-success">${fmtMoney(change)}</div></div>` : ''}
-      </div>
-    </div>`;
+  const payload = {
+    customer_id: posState.customerId || null,
+    items: posState.cart.map(i => ({ product_id: i.productId, quantity: i.qty })),
+    discount_type: posState.discountType,
+    discount_value: posState.discount,
+    payment_method: posState.paymentMethod,
+    amount_tendered: posState.paymentMethod === 'cash' ? tendered : undefined,
+  };
 
-  const footer = `
-    <button class="btn btn-outline-secondary" id="emailReceiptBtn"><i class="bi bi-envelope me-1"></i>Email</button>
-    <button class="btn btn-outline-secondary" id="printReceiptBtn"><i class="bi bi-printer me-1"></i>Print</button>
-    <button class="btn btn-primary" id="newSaleBtn"><i class="bi bi-bag-check me-1"></i>New Sale</button>`;
+  const chargeBtn = document.getElementById('chargeBtn');
+  chargeBtn.disabled = true;
 
-  const modal = formModal('Sale Completed', successHtml, footer);
-  document.getElementById('printReceiptBtn').addEventListener('click', () => printReceipt(invoice, customer, posState.cart, subtotal, discount, tax, total, change));
-  document.getElementById('emailReceiptBtn').addEventListener('click', () => showToast('Receipt emailed to ' + (customer.email || 'customer'), 'success'));
-  document.getElementById('newSaleBtn').addEventListener('click', () => { modal.hide(); navigateTo('pos'); });
+  let sale;
+  try {
+    const result = await apiFetch('/catalog/sales', { method: 'POST', body: payload });
+    sale = result.data;
+  } catch (e) {
+    chargeBtn.disabled = false;
+    showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+    return;
+  }
 
-  // Add to SALES
-  SALES.unshift({
-    id: 'sale-' + Date.now(), invoice, date: new Date().toISOString(),
-    customerId: customer.id, customerName: customer.name,
-    items: posState.cart.map(i => ({ ...i })), itemCount: posState.cart.reduce((s, i) => s + i.qty, 0),
-    subtotal, tax, discount, total, paid: total, due: 0, method: posState.paymentMethod, status: 'completed',
-    salesperson: currentUser ? currentUser.name : 'Cashier',
-  });
-  // Decrement stock
-  posState.cart.forEach(item => { const p = productById(item.productId); if (p) p.stock -= item.qty; });
+  const change = Math.max(0, tendered - sale.grand_total);
+  showSaleReceipt(sale, change);
 
   posState.cart = [];
   posState.discount = 0;
   renderCart();
+
+  // Stock just changed server-side — refresh the grid so quantities
+  // (and out-of-stock styling) reflect what actually happened.
+  try {
+    const refreshed = await apiFetch('/catalog/products?status=active&per_page=1000');
+    posProducts = refreshed.data;
+    renderPOSProducts();
+  } catch (e) { /* non-critical — grid just stays stale until next navigation */ }
 }
 
-function printReceipt(invoice, customer, cart, subtotal, discount, tax, total, change) {
-  const html = `<html><head><title>Receipt ${invoice}</title><style>
+function showSaleReceipt(sale, change) {
+  const itemCount = sale.items.reduce((s, i) => s + i.quantity, 0);
+  const successHtml = `
+    <div class="text-center py-3">
+      <div class="kpi-icon mx-auto mb-3 bg-soft-success" style="width:64px;height:64px;font-size:32px;"><i class="bi bi-check-lg"></i></div>
+      <h4 class="fw-700">Sale Completed!</h4>
+      <p class="text-muted">Invoice ${sale.invoice_no}</p>
+      <div class="row text-start mt-4">
+        <div class="col-6"><div class="text-muted small">Customer</div><div class="fw-600">${sale.customer?.name || 'Walk-in Customer'}</div></div>
+        <div class="col-6 text-end"><div class="text-muted small">Date</div><div class="fw-600">${fmtDate(sale.sale_date)}</div></div>
+        <div class="col-6 mt-2"><div class="text-muted small">Items</div><div class="fw-600">${itemCount}</div></div>
+        <div class="col-6 mt-2 text-end"><div class="text-muted small">Payment</div><div class="fw-600 text-capitalize">${sale.payment_status === 'due' ? 'Credit' : sale.payment_status}</div></div>
+        <div class="col-12 mt-3"><hr></div>
+        <div class="col-6"><div class="text-muted small">Subtotal</div><div class="fw-600">${fmtMoney(sale.subtotal)}</div></div>
+        <div class="col-6 text-end"><div class="text-muted small">Discount</div><div class="fw-600">-${fmtMoney(sale.discount)}</div></div>
+        <div class="col-6 mt-1"><div class="text-muted small">Tax</div><div class="fw-600">${fmtMoney(sale.tax_total)}</div></div>
+        <div class="col-6 mt-1 text-end"><div class="text-muted small">Total</div><div class="fw-700 fs-5">${fmtMoney(sale.grand_total)}</div></div>
+        ${sale.paid_amount > 0 && change > 0 ? `<div class="col-6 mt-1"><div class="text-muted small">Tendered</div><div class="fw-600">${fmtMoney(sale.paid_amount + change)}</div></div><div class="col-6 mt-1 text-end"><div class="text-muted small">Change</div><div class="fw-600 text-success">${fmtMoney(change)}</div></div>` : ''}
+        ${sale.due_amount > 0 ? `<div class="col-12 mt-2"><div class="alert alert-warning py-2 small mb-0">Added ${fmtMoney(sale.due_amount)} to this customer's balance.</div></div>` : ''}
+      </div>
+    </div>`;
+
+  const footer = `
+    <button class="btn btn-outline-secondary" id="printReceiptBtn"><i class="bi bi-printer me-1"></i>Print</button>
+    <button class="btn btn-primary" id="newSaleBtn"><i class="bi bi-bag-check me-1"></i>New Sale</button>`;
+
+  const modal = formModal('Sale Completed', successHtml, footer);
+  document.getElementById('printReceiptBtn').addEventListener('click', () => printReceipt(sale, change));
+  document.getElementById('newSaleBtn').addEventListener('click', () => { modal.hide(); navigateTo('pos'); });
+}
+
+function printReceipt(sale, change) {
+  const html = `<html><head><title>Receipt ${sale.invoice_no}</title><style>
     body{font-family:monospace;font-size:12px;max-width:300px;margin:0 auto;padding:20px;}
     h3{text-align:center;margin:5px 0;} .center{text-align:center;} .line{border-top:1px dashed #000;margin:8px 0;}
     table{width:100%;} td{padding:2px 0;} .right{text-align:right;} .bold{font-weight:bold;}
@@ -401,19 +471,19 @@ function printReceipt(invoice, customer, cart, subtotal, discount, tax, total, c
     <div class="center">${SETTINGS.business.address}</div>
     <div class="center">${SETTINGS.business.phone}</div>
     <div class="line"></div>
-    <div>Invoice: ${invoice}</div>
-    <div>Date: ${new Date().toLocaleString()}</div>
-    <div>Customer: ${customer.name}</div>
+    <div>Invoice: ${sale.invoice_no}</div>
+    <div>Date: ${fmtDateTime(sale.sale_date)}</div>
+    <div>Customer: ${sale.customer?.name || 'Walk-in Customer'}</div>
     <div class="line"></div>
     <table>
-      ${cart.map(i => `<tr><td>${i.qty}x ${i.name}</td><td class="right">${fmtMoney(i.price*i.qty)}</td></tr>`).join('')}
+      ${sale.items.map(i => `<tr><td>${i.quantity}x ${i.name}</td><td class="right">${fmtMoney(i.line_total)}</td></tr>`).join('')}
     </table>
     <div class="line"></div>
     <table>
-      <tr><td>Subtotal</td><td class="right">${fmtMoney(subtotal)}</td></tr>
-      <tr><td>Discount</td><td class="right">-${fmtMoney(discount)}</td></tr>
-      <tr><td>Tax</td><td class="right">${fmtMoney(tax)}</td></tr>
-      <tr class="bold"><td>TOTAL</td><td class="right">${fmtMoney(total)}</td></tr>
+      <tr><td>Subtotal</td><td class="right">${fmtMoney(sale.subtotal)}</td></tr>
+      <tr><td>Discount</td><td class="right">-${fmtMoney(sale.discount)}</td></tr>
+      <tr><td>Tax</td><td class="right">${fmtMoney(sale.tax_total)}</td></tr>
+      <tr class="bold"><td>TOTAL</td><td class="right">${fmtMoney(sale.grand_total)}</td></tr>
       ${change > 0 ? `<tr><td>Change</td><td class="right">${fmtMoney(change)}</td></tr>` : ''}
     </table>
     <div class="line"></div>

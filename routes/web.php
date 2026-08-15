@@ -3,8 +3,10 @@
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\CustomerController as CustomerApiController;
 use App\Http\Controllers\Api\NotificationController as NotificationApiController;
 use App\Http\Controllers\Api\ProductController as ProductApiController;
+use App\Http\Controllers\Api\SaleController as SaleApiController;
 use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\TaxController;
 use App\Http\Controllers\Api\UnitController;
@@ -110,5 +112,13 @@ Route::middleware('auth')->group(function () {
         Route::get('notifications', [NotificationApiController::class, 'index'])->name('notifications.index');
         Route::post('notifications/read-all', [NotificationApiController::class, 'markAllRead'])->name('notifications.read-all');
         Route::post('notifications/{notification}/read', [NotificationApiController::class, 'markRead'])->name('notifications.read');
+
+        // Read-only — the POS terminal's customer picker needs real
+        // customer IDs; full customer management is Phase 8.
+        Route::get('customers', [CustomerApiController::class, 'index'])->name('customers.index')->middleware('module:people');
+
+        // The POS checkout endpoint itself — see SaleController for
+        // why it only accepts product_id + quantity, never a price.
+        Route::post('sales', [SaleApiController::class, 'store'])->name('sales.store');
     });
 });
