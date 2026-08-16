@@ -524,10 +524,32 @@ items off as we complete them so it always reflects real project status.
       became a single real **PDF** button reusing Phase 5's
       `/sales/{sale}/receipt` endpoint instead of the old thermal-print
       mock template.
-- [ ] Returns/refunds flow with restock toggle — deliberately left as
-      a real "not wired up yet" toast (`showRefundModal`), not a
-      silently broken function operating on real sale IDs with mock
-      logic. This is its own next step.
+- [x] Returns/refunds flow with restock toggle — `POST
+      /catalog/sales/{sale}/refund` (`SaleController::refund`),
+      gated by `sales:edit` — Cashier only has `view`+`add` on sales
+      (already true in the seeded matrix before this step), so this
+      deliberately requires a Manager/Admin, matching how refund
+      authorization works in a real shop rather than letting any
+      cashier self-approve one. Scoped to a **full-sale** refund, not
+      a per-line-item picker — that matches the roadmap's own wording
+      ("restock toggle," one whole-order decision) and keeps this from
+      requiring a whole new returns/return-items schema.
+      - `restock: true` puts every item's quantity back via real
+        `stock_movements` rows using the `return_in` type — that enum
+        value existed since Phase 1 and sat unused until now.
+      - If the sale had an outstanding balance on a real customer's
+        account, that balance is reversed too — voiding a sale
+        shouldn't leave the customer still owing for it.
+      - The sale's own financial figures are left untouched as the
+        historical record of what actually happened; only `status`
+        changes to `refunded`. Deliberately NOT modeled: reversing the
+        original `Payment` rows or creating "money handed back"
+        records — that's a real cash-drawer event tied to a specific
+        shift, which a simple restock toggle doesn't cover.
+      - `sales.js`'s refund modal replaced the earlier honest stub
+        with the real flow: fetches the sale, shows its items
+        read-only, a reason field (folded into `sales.notes` rather
+        than a new column), and the restock checkbox.
 - [x] Fix known regression: dashboard "recent sale" row click should
       deep-link to `/sales?sale=ID` and auto-open that sale's detail —
       fixed at the mechanism level: `sales.js` now reads

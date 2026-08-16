@@ -190,13 +190,62 @@ window.showSaleDetail = async function(id) {
 }
 
 /**
- * Returns/refunds — the actual return logic (restock toggle, partial
- * item selection, refund-method-specific handling) is its own
- * roadmap item, not this one. This stays an honest stub rather than
- * silently operating on the now-real sale IDs with mock-only logic —
- * see the "Fix known regression" note in README Phase 6.
+ * Full-sale refund — matches the "restock toggle" wording in the
+ * roadmap (one whole-order decision, not a per-line-item picker).
+ * Requires sales:edit — enforced server-side, so a user who can see
+ * this button but lacks that permission just gets a clear 403 toast,
+ * consistent with how the rest of the app doesn't duplicate
+ * permission checks into conditional UI hiding.
  */
-function showRefundModal(id) {
-  showToast('Returns/refunds are coming in the next step — not wired up yet.', 'info');
-}
+async function showRefundModal(id) {
+  const modal = formModal('Return / Refund', simpleLoading(), '<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button>');
 
+  let s;
+  try {
+    const result = await apiFetch(`/catalog/sales/${id}`);
+    s = result.data;
+  } catch (e) {
+    document.querySelector('.modal-body').innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load sale", e.message);
+    return;
+  }
+
+  if (s.status !== 'completed') {
+    document.querySelector('.modal-body').innerHTML = emptyState('bi-info-circle', 'Nothing to refund', `This sale is already ${s.status}.`);
+    return;
+  }
+
+  const body = `
+    <div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle me-2"></i>Refunding <strong>${s.invoice_no}</strong> (${fmtMoney(s.grand_total)}) — this reverses the whole sale.</div>
+    <div class="mb-3">
+      <label class="form-label small text-muted mb-1">Items</label>
+      <div class="border rounded p-2">
+        ${s.items.map(it => `<div class="d-flex justify-content-between small py-1"><span>${it.name}</span><span>${it.quantity} &times; ${fmtMoney(it.unit_price)}</span></div>`).join('')}
+      </div>
+    </div>
+    <div class="mb-3"><label class="form-label">Reason (optional)</label><textarea class="form-control" id="refundReason" rows="2"></textarea></div>
+    <div class="form-check mb-2"><input type="checkbox" class="form-check-input" id="refundRestock" checked><label class="form-check-label" for="refundRestock">Restock returned items</label></div>
+    ${s.due_amount > 0 && s.customer ? `<div class="small text-muted"><i class="bi bi-info-circle me-1"></i>${fmtMoney(s.due_amount)} will be removed from ${s.customer.name}'s balance.</div>` : ''}`;
+
+  document.querySelector('.modal-title').textContent = 'Return / Refund — ' + s.invoice_no;
+  document.querySelector('.modal-body').innerHTML = body;
+  document.querySelector('.modal-footer').innerHTML = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-danger" id="processRefundBtn">Process Refund</button>`;
+
+  document.getElementById('processRefundBtn').addEventListener('click', async () => {
+    const payload = {
+      restock: document.getElementById('refundRestock').checked,
+      reason: document.getElementById('refundReason').value || null,
+    };
+    const btn = document.getElementById('processRefundBtn');
+    btn.disabled = true;
+    try {
+      await apiFetch(`/catalog/sales/${id}/refund`, { method: 'POST', body: payload });
+    } catch (e) {
+      btn.disabled = false;
+      showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+      return;
+    }
+    modal.hide();
+    renderSalesTable();
+    showToast('Refund processed successfully', 'success');
+  });
+}

@@ -29,6 +29,12 @@ class SaleController extends Controller implements HasMiddleware
             // Sales history is a Sales-screen concern, not a POS one —
             // a different module permission than checkout/hold above.
             new Middleware('module:sales', only: ['index', 'show']),
+            // Refunds require sales:edit — Cashier only has view+add on
+            // sales (see RoleSeeder), so this deliberately requires a
+            // Manager/Admin, matching how refund authorization
+            // typically works in a real shop (a real anti-fraud
+            // control, not an oversight).
+            new Middleware('module:sales,edit', only: ['refund']),
         ];
     }
 
@@ -82,6 +88,77 @@ class SaleController extends Controller implements HasMiddleware
     public function show(Sale $sale): JsonResponse
     {
         return (new SaleResource($sale->load(['customer', 'cashier', 'items.product', 'payments'])))->response();
+    }
+
+    /**
+     * POST /catalog/sales/{sale}/refund
+     *
+     * A full-sale refund — matches the "restock toggle" wording in
+     * the roadmap, which describes one whole-order decision, not a
+     * per-line-item return picker. Reverses exactly what a real
+     * refund actually reverses:
+     * - `restock: true` puts every item's quantity back into stock,
+     *   via real `stock_movements` rows using the `return_in` type —
+     *   that enum value existed since Phase 1 and was never used
+     *   until now.
+     * - If the sale had an outstanding balance on a real customer's
+     *   account (a credit/partial sale), that balance is reversed —
+     *   voiding a sale shouldn't leave the customer still owing for it.
+     * - The sale's own financial figures (grand_total, paid_amount,
+     *   etc.) are left untouched as the historical record of what the
+     *   original transaction was; only `status` changes to `refunded`.
+     * Deliberately NOT modeled: reversing the original Payment rows
+     * or creating new "money handed back" records — that's a real
+     * cash-drawer event with its own considerations (which register,
+     * which shift) that a simple restock toggle doesn't cover.
+     */
+    public function refund(Request $request, Sale $sale): JsonResponse
+    {
+        if ($sale->status !== 'completed') {
+            abort(422, 'Only a completed sale can be refunded.');
+        }
+
+        $data = $request->validate([
+            'restock' => ['required', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        DB::transaction(function () use ($sale, $data, $request) {
+            $sale->load('items.product');
+
+            if ($data['restock']) {
+                foreach ($sale->items as $item) {
+                    $product = Product::whereKey($item->product_id)->lockForUpdate()->first();
+                    if (! $product) {
+                        continue; // product was deleted since the sale — nothing to restock
+                    }
+
+                    $newStock = $product->current_stock + $item->quantity;
+                    $product->update(['current_stock' => $newStock]);
+
+                    StockMovement::create([
+                        'product_id' => $product->id,
+                        'type' => 'return_in',
+                        'quantity' => $item->quantity,
+                        'balance_after' => $newStock,
+                        'reference_type' => Sale::class,
+                        'reference_id' => $sale->id,
+                        'user_id' => $request->user()->id,
+                    ]);
+                }
+            }
+
+            if ($sale->due_amount > 0 && $sale->customer_id) {
+                Customer::whereKey($sale->customer_id)->decrement('current_balance', $sale->due_amount);
+            }
+
+            $sale->update([
+                'status' => 'refunded',
+                'notes' => trim(($sale->notes ? $sale->notes . ' | ' : '') . 'Refunded' . (! empty($data['reason']) ? ": {$data['reason']}" : '')),
+            ]);
+        });
+
+        return (new SaleResource($sale->fresh()->load(['customer', 'cashier', 'items.product', 'payments'])))->response();
     }
 
     /**

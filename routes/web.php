@@ -138,6 +138,7 @@ Route::middleware('auth')->group(function () {
         // otherwise swallow that literal path first.
         Route::get('sales', [SaleApiController::class, 'index'])->name('sales.index');
         Route::get('sales/{sale}', [SaleApiController::class, 'show'])->name('sales.show');
+        Route::post('sales/{sale}/refund', [SaleApiController::class, 'refund'])->name('sales.refund');
 
         // Cash register shifts — per-cashier open/close, with expected
         // cash computed from real Payment rows. See
