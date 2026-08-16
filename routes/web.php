@@ -133,6 +133,12 @@ Route::middleware('auth')->group(function () {
         Route::post('sales/hold', [SaleApiController::class, 'hold'])->name('sales.hold');
         Route::delete('sales/{sale}/held', [SaleApiController::class, 'destroyHeld'])->name('sales.held.destroy');
 
+        // Sales history for the Sales screen. Registered after
+        // sales/held above — sales/{sale} is a wildcard and would
+        // otherwise swallow that literal path first.
+        Route::get('sales', [SaleApiController::class, 'index'])->name('sales.index');
+        Route::get('sales/{sale}', [SaleApiController::class, 'show'])->name('sales.show');
+
         // Cash register shifts — per-cashier open/close, with expected
         // cash computed from real Payment rows. See
         // CashRegisterShiftController for why.

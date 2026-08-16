@@ -498,11 +498,52 @@ items off as we complete them so it always reflects real project status.
       This closes out Phase 5 entirely.
 
 ### Phase 6 — Sales & Returns
-- [ ] Sales history backed by real records
-- [ ] Sale detail view with real itemized data
-- [ ] Returns/refunds flow with restock toggle
-- [ ] Fix known regression: dashboard "recent sale" row click should
-      deep-link to `/sales?sale=ID` and auto-open that sale's detail
+- [x] Sales history backed by real records — `GET /catalog/sales`
+      (`SaleController::index`), gated by the `sales` module
+      permission (distinct from the `pos` permission checkout/hold use
+      — different screen, different permission). Excludes held orders
+      by default (those aren't real transactions yet — see Phase 5).
+      Supports `q` (invoice number or customer name), `status`
+      (`completed`/`refunded`/`cancelled` — fixed the filter dropdown,
+      which still had a `pending` option that doesn't exist as a real
+      status), and `payment_method` (`cash`/`card`/`wallet`/`credit`
+      — `credit` means "still has a balance due"; the others match
+      sales with *at least one* payment of that method, since a
+      split-payment sale can have more than one — see
+      `SaleResource::paymentMethodLabel()`, which shows a single
+      method name, "Split", or "Credit" in the list depending on what
+      actually happened).
+- [x] Sale detail view with real itemized data — `GET
+      /catalog/sales/{sale}` (`SaleController::show`), full items +
+      every payment. Wiring the list forced an immediate fix here too:
+      once table rows carried real numeric sale IDs, the *old*
+      `showSaleDetail()` (`SALES.find(x => x.id === id)` against the
+      mock array) would have silently failed on every click — not a
+      separate future task, a regression from this same step, fixed
+      in the same commit. The detail modal's Print/Download buttons
+      became a single real **PDF** button reusing Phase 5's
+      `/sales/{sale}/receipt` endpoint instead of the old thermal-print
+      mock template.
+- [ ] Returns/refunds flow with restock toggle — deliberately left as
+      a real "not wired up yet" toast (`showRefundModal`), not a
+      silently broken function operating on real sale IDs with mock
+      logic. This is its own next step.
+- [x] Fix known regression: dashboard "recent sale" row click should
+      deep-link to `/sales?sale=ID` and auto-open that sale's detail —
+      fixed at the mechanism level: `sales.js` now reads
+      `?sale=ID` from its own URL on load and auto-opens that sale's
+      detail, and the dashboard's click handler does a real navigation
+      to that URL instead of the old `navigateTo()` + `setTimeout()`
+      pattern, which never worked after Phase 2 made navigation a real
+      page load (the JS context — and the pending `setTimeout` — was
+      gone the instant the browser left the page). **Honest caveat**:
+      Dashboard's Recent Orders table is still mock data (Dashboard's
+      full wiring is separate, later work), so today this deep-links
+      with a mock ID that the real Sales screen won't find — it shows
+      a graceful "couldn't load sale" state, not a crash. The
+      mechanism itself is now correct end-to-end; once Recent Orders
+      reads real sales, this starts working with zero further changes
+      needed here.
 
 ### Phase 7 — Purchases
 - [ ] Purchase order creation against real suppliers/products

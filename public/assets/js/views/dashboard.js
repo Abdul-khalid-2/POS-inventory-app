@@ -146,7 +146,19 @@ registerView('dashboard', function() {
   document.querySelector('[data-nav="pos"]')?.addEventListener('click', e => { e.preventDefault(); navigateTo('pos'); });
   document.querySelectorAll('[data-nav]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); navigateTo(el.dataset.nav); }));
   document.getElementById('refreshDash')?.addEventListener('click', () => { showToast('Dashboard refreshed', 'success'); navigateTo('dashboard'); });
-  document.querySelectorAll('[data-sale-detail]').forEach(tr => tr.addEventListener('click', () => { if (VIEWS.sales) { navigateTo('sales'); setTimeout(() => window.showSaleDetail?.(tr.dataset.saleDetail), 200); } }));
+  // Real page navigation (Phase 2) means a client-side handoff via
+  // setTimeout after navigateTo() never survives — the JS context is
+  // gone the moment the browser leaves this page. A URL query param
+  // is the only thing that actually makes it to the next page.
+  // NOTE: Recent Orders below is still mock data (Dashboard's own
+  // full wiring is a separate task) — clicking a row here deep-links
+  // with a mock id, which the real Sales screen won't find and will
+  // show a graceful "couldn't load sale" state for, not a crash. Once
+  // Recent Orders reads real sales, this starts working end-to-end
+  // with no further changes needed here.
+  document.querySelectorAll('[data-sale-detail]').forEach(tr => tr.addEventListener('click', () => {
+    window.location.href = '/sales?sale=' + encodeURIComponent(tr.dataset.saleDetail);
+  }));
 
   renderDashboardCharts();
   loadLowStockWidgets();

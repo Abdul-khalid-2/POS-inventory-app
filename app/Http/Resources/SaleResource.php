@@ -29,7 +29,9 @@ class SaleResource extends JsonResource
             'paid_amount' => (float) $this->paid_amount,
             'due_amount' => (float) $this->due_amount,
             'payment_status' => $this->payment_status,
+            'payment_method_label' => $this->paymentMethodLabel(),
             'status' => $this->status,
+            'items_count' => $this->whenCounted('items'),
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($item) => [
                 'product_id' => $item->product_id,
                 'name' => $item->product?->name,
@@ -45,5 +47,26 @@ class SaleResource extends JsonResource
             ])),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * A single-word summary for the sales list's "Method" column — a
+     * sale can have zero payments (pure credit), one, or several
+     * (split payment), so there's no single "the" method to show
+     * without this.
+     */
+    private function paymentMethodLabel(): ?string
+    {
+        if (! $this->relationLoaded('payments')) {
+            return null;
+        }
+
+        $methods = $this->payments->pluck('method')->unique();
+
+        return match (true) {
+            $methods->isEmpty() => 'Credit',
+            $methods->count() === 1 => ucfirst($methods->first()),
+            default => 'Split',
+        };
     }
 }

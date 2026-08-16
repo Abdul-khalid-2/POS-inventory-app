@@ -26,7 +26,62 @@ class SaleController extends Controller implements HasMiddleware
         return [
             new Middleware('module:pos,add', only: ['store', 'hold', 'destroyHeld']),
             new Middleware('module:pos', only: ['heldIndex']),
+            // Sales history is a Sales-screen concern, not a POS one —
+            // a different module permission than checkout/hold above.
+            new Middleware('module:sales', only: ['index', 'show']),
         ];
+    }
+
+    /**
+     * GET /catalog/sales — sales history for the Sales screen.
+     * Excludes held orders by default (those live in the POS
+     * terminal's own drawer, not sales history — see heldIndex()) and
+     * never returns them even if a status filter is passed, since a
+     * held order was never actually a completed transaction.
+     *
+     * Supports: q (invoice number or customer name), status
+     * (completed/refunded/cancelled), payment_method
+     * (cash/card/wallet/credit — 'credit' means still has a balance
+     * due; the others match sales with at least one Payment of that
+     * method, since a split-payment sale can have more than one).
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $query = Sale::query()->where('status', '!=', 'held')->withCount('items')->with(['customer', 'cashier', 'payments']);
+
+        if ($search = $request->string('q')->trim()->value()) {
+            $query->where(function ($q) use ($search) {
+                $q->where('invoice_no', 'like', "%{$search}%")
+                    ->orWhereHas('customer', fn ($c) => $c->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        if ($request->filled('status') && $request->string('status')->value() !== 'all') {
+            $query->where('status', $request->string('status'));
+        }
+
+        if ($request->filled('payment_method') && $request->string('payment_method')->value() !== 'all') {
+            $method = $request->string('payment_method')->value();
+            if ($method === 'credit') {
+                $query->where('due_amount', '>', 0);
+            } else {
+                $query->whereHas('payments', fn ($p) => $p->where('method', $method));
+            }
+        }
+
+        $sales = $query->latest('sale_date')->paginate($request->integer('per_page', 10));
+
+        return SaleResource::collection($sales)->response();
+    }
+
+    /**
+     * GET /catalog/sales/{sale} — full detail for one sale, including
+     * line items and every payment (a split-payment sale can have
+     * more than one).
+     */
+    public function show(Sale $sale): JsonResponse
+    {
+        return (new SaleResource($sale->load(['customer', 'cashier', 'items.product', 'payments'])))->response();
     }
 
     /**
