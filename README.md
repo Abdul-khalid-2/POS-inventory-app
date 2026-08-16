@@ -568,8 +568,38 @@ items off as we complete them so it always reflects real project status.
       needed here.
 
 ### Phase 7 — Purchases
-- [ ] Purchase order creation against real suppliers/products
-- [ ] Goods Received Note (partial receiving supported), auto stock update
+- [x] Purchase order creation against real suppliers/products —
+      `POST /catalog/purchases` (`PurchaseController::store`). Same
+      "never trust the client's price" principle as checkout: only
+      `product_id` + `quantity` come from the client, `unit_cost` is
+      always the product's real current `cost_price`. Reuses the exact
+      same proportional-discount / per-line-tax-rate math already
+      built for `SaleController` — a product's tax rate applies the
+      same way whether you're buying or selling it, so this wasn't
+      new logic, just the same pattern applied a second time. Added a
+      minimal read-only `GET /catalog/suppliers` (same precedent as
+      Customers/Tax before it — the PO form's supplier picker needed
+      real IDs; full supplier management stays Phase 8). Also added
+      `purchases.expected_date` via a new migration — the screen
+      always had this field, but the original Phase 1 migration never
+      included a column for it.
+- [x] Goods Received Note (partial receiving supported), auto stock
+      update — `POST /catalog/purchases/{purchase}/receive`. Genuinely
+      supports partial receiving: quantity per line is what arrived
+      *in this delivery*, not a running total, and a PO can be received
+      across more than one GRN — `status` tracks
+      `draft/ordered → partially_received → received` automatically
+      based on each line's `received_quantity` vs `quantity`. Writes
+      real `stock_movements` rows using the `purchase_in` type,
+      increments `products.current_stock`, and rejects (422) trying to
+      receive more than what's still outstanding on a line. No
+      `StockNotifier` call here — receiving only ever *increases*
+      stock, which can't cross a product *into* low/out-of-stock
+      territory, so there's structurally nothing for it to fire on.
+      `purchases.js` rewired: PO list, detail, create, and the GRN
+      modal now all read/write real data. The "Print PO" button stays
+      an honest "not built yet" toast — that wasn't part of this
+      checklist item and Sales' real PDF work doesn't extend here yet.
 - [ ] Purchase returns
 
 ### Phase 8 — People (Customers, Suppliers, Staff)

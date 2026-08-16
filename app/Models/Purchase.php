@@ -13,7 +13,7 @@ class Purchase extends Model
     use HasFactory;
 
     protected $fillable = [
-        'po_no', 'supplier_id', 'user_id', 'purchase_date',
+        'po_no', 'supplier_id', 'user_id', 'purchase_date', 'expected_date',
         'subtotal', 'discount', 'tax_total', 'grand_total',
         'paid_amount', 'due_amount', 'status', 'payment_status',
     ];
@@ -22,6 +22,7 @@ class Purchase extends Model
     {
         return [
             'purchase_date' => 'datetime',
+            'expected_date' => 'date',
             'subtotal' => 'decimal:2',
             'discount' => 'decimal:2',
             'tax_total' => 'decimal:2',

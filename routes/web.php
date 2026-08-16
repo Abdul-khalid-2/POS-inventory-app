@@ -7,8 +7,10 @@ use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CustomerController as CustomerApiController;
 use App\Http\Controllers\Api\NotificationController as NotificationApiController;
 use App\Http\Controllers\Api\ProductController as ProductApiController;
+use App\Http\Controllers\Api\PurchaseController as PurchaseApiController;
 use App\Http\Controllers\Api\SaleController as SaleApiController;
 use App\Http\Controllers\Api\StockAdjustmentController;
+use App\Http\Controllers\Api\SupplierController as SupplierApiController;
 use App\Http\Controllers\Api\TaxController;
 use App\Http\Controllers\Api\UnitController;
 use App\Http\Controllers\Auth\AuthController;
@@ -147,5 +149,16 @@ Route::middleware('auth')->group(function () {
         Route::get('shifts', [CashRegisterShiftController::class, 'index'])->name('shifts.index');
         Route::post('shifts/open', [CashRegisterShiftController::class, 'open'])->name('shifts.open');
         Route::post('shifts/{shift}/close', [CashRegisterShiftController::class, 'close'])->name('shifts.close');
+
+        // Read-only — the purchase order form's supplier picker needs
+        // real supplier IDs; full supplier management is Phase 8.
+        Route::get('suppliers', [SupplierApiController::class, 'index'])->name('suppliers.index')->middleware('module:people');
+
+        // Purchase orders + goods received (GRN). See PurchaseController
+        // for why unit_cost always comes from the product, never the client.
+        Route::get('purchases', [PurchaseApiController::class, 'index'])->name('purchases.index');
+        Route::post('purchases', [PurchaseApiController::class, 'store'])->name('purchases.store');
+        Route::get('purchases/{purchase}', [PurchaseApiController::class, 'show'])->name('purchases.show');
+        Route::post('purchases/{purchase}/receive', [PurchaseApiController::class, 'receive'])->name('purchases.receive');
     });
 });
