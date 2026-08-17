@@ -29,6 +29,17 @@ class StockMovementResource extends JsonResource
                 'id' => $this->user->id,
                 'name' => $this->user->name,
             ] : null),
+            // The Sale or Purchase this movement is tied to, if any —
+            // e.g. which PO a supplier return relates back to.
+            'reference' => $this->whenLoaded('reference', fn () => $this->reference ? [
+                'type' => match ($this->reference_type) {
+                    \App\Models\Sale::class => 'sale',
+                    \App\Models\Purchase::class => 'purchase',
+                    default => 'other',
+                },
+                'id' => $this->reference->id,
+                'label' => $this->reference->invoice_no ?? $this->reference->po_no ?? (string) $this->reference->id,
+            ] : null),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

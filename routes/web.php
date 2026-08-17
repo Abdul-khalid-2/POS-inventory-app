@@ -158,7 +158,12 @@ Route::middleware('auth')->group(function () {
         // for why unit_cost always comes from the product, never the client.
         Route::get('purchases', [PurchaseApiController::class, 'index'])->name('purchases.index');
         Route::post('purchases', [PurchaseApiController::class, 'store'])->name('purchases.store');
+        // Must come before purchases/{purchase} — that's a wildcard
+        // and would otherwise swallow "returns" as if it were a
+        // purchase ID (same trap as products/generate-sku earlier).
+        Route::get('purchases/returns', [PurchaseApiController::class, 'returnsIndex'])->name('purchases.returns.index');
         Route::get('purchases/{purchase}', [PurchaseApiController::class, 'show'])->name('purchases.show');
         Route::post('purchases/{purchase}/receive', [PurchaseApiController::class, 'receive'])->name('purchases.receive');
+        Route::post('purchases/{purchase}/return', [PurchaseApiController::class, 'returnItems'])->name('purchases.return');
     });
 });

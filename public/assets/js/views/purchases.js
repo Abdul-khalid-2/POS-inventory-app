@@ -316,5 +316,129 @@ async function renderGRN(c) {
 }
 
 function renderPOReturns(c) {
-  c.innerHTML = `<div class="card"><div class="card-body">${emptyState('bi-box-arrow-left', 'No purchase returns', 'Return items to suppliers from a received purchase order.')}</div></div>`;
+  c.innerHTML = `
+    <div class="toolbar"><div class="toolbar-spacer"></div><button class="btn btn-primary btn-sm" id="newReturn"><i class="bi bi-plus-lg me-1"></i>New Return</button></div>
+    <div class="card table-card">
+      <div class="card-header">Purchase Returns</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead><tr><th>Date</th><th>PO #</th><th>Product</th><th>Qty Returned</th><th>Reason</th><th>By</th></tr></thead>
+            <tbody id="returnsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card-body d-flex justify-content-between align-items-center" id="returnsPagination"></div>
+    </div>`;
+  document.getElementById('newReturn').addEventListener('click', () => newPurchaseReturnModal());
+  renderReturnsTable(1);
+}
+
+async function renderReturnsTable(page) {
+  const body = document.getElementById('returnsTableBody');
+  if (!body) return;
+  body.innerHTML = skeletonRows(5, 6);
+
+  let result;
+  try {
+    result = await apiFetch(`/catalog/purchases/returns?page=${page}&per_page=15`);
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6">${emptyState('bi-exclamation-triangle', "Couldn't load returns", e.message)}</td></tr>`;
+    return;
+  }
+
+  const items = result.data;
+  const meta = result.meta;
+  body.innerHTML = items.length ? items.map(r => `
+    <tr>
+      <td>${fmtDateTime(r.created_at)}</td>
+      <td class="fw-600">${r.reference?.label || '—'}</td>
+      <td>${r.product?.name || '—'}</td>
+      <td>${r.quantity} ${r.product?.unit?.short_code || ''}</td>
+      <td class="small text-muted">${r.reason || '—'}</td>
+      <td class="small text-muted">${r.user?.name || '—'}</td>
+    </tr>`).join('') : `<tr><td colspan="6">${emptyState('bi-box-arrow-left', 'No purchase returns yet', 'Return items to a supplier from a received purchase order.')}</td></tr>`;
+
+  const pag = document.getElementById('returnsPagination');
+  pag.innerHTML = `<div class="small text-muted">${meta.total} returns</div>${renderPagination(meta.total, meta.current_page, meta.per_page, renderReturnsTable)}`;
+  attachPaginationClicks(pag, renderReturnsTable);
+}
+
+async function newPurchaseReturnModal() {
+  const modal = formModal('New Purchase Return', simpleLoading(), '<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button>');
+
+  let eligible;
+  try {
+    const result = await apiFetch('/catalog/purchases?per_page=1000');
+    eligible = result.data.filter(p => p.status === 'received' || p.status === 'partially_received');
+  } catch (e) {
+    document.querySelector('.modal-body').innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load purchase orders", e.message);
+    return;
+  }
+
+  if (!eligible.length) {
+    document.querySelector('.modal-body').innerHTML = emptyState('bi-info-circle', 'Nothing to return', 'No received purchase orders yet — items can only be returned once they\'ve arrived.');
+    return;
+  }
+
+  document.querySelector('.modal-body').innerHTML = `
+    <div class="mb-3"><label class="form-label">Purchase Order *</label>
+      <select class="form-select" id="retPoSelect">${eligible.map(p => `<option value="${p.id}">${p.po_no} — ${p.supplier?.name || '—'}</option>`).join('')}</select>
+    </div>
+    <div id="retItemsContainer"><div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div></div>`;
+
+  const loadItemsForPO = async (poId) => {
+    const container = document.getElementById('retItemsContainer');
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+    let po;
+    try {
+      const result = await apiFetch(`/catalog/purchases/${poId}`);
+      po = result.data;
+    } catch (e) {
+      container.innerHTML = emptyState('bi-exclamation-triangle', "Couldn't load items", e.message);
+      return;
+    }
+    const returnable = po.items.filter(it => (it.received_quantity - it.returned_quantity) > 0);
+    if (!returnable.length) {
+      container.innerHTML = '<div class="text-muted small">Every item on this PO has already been fully returned.</div>';
+      return;
+    }
+    container.innerHTML = `
+      <label class="form-label">Items to Return</label>
+      <table class="table table-sm"><thead><tr><th>Product</th><th>Eligible</th><th>Return Qty</th></tr></thead><tbody>
+      ${returnable.map(it => {
+        const max = it.received_quantity - it.returned_quantity;
+        return `<tr><td>${it.name}</td><td>${max} ${it.unit || ''}</td><td><input type="number" class="form-control form-control-sm" style="width:90px;" data-ret-item="${it.id}" value="0" min="0" max="${max}"></td></tr>`;
+      }).join('')}
+      </tbody></table>
+      <div class="mb-2"><label class="form-label">Reason</label><textarea class="form-control" id="retReason" rows="2" placeholder="e.g. Damaged in transit"></textarea></div>`;
+  };
+
+  document.getElementById('retPoSelect').addEventListener('change', e => loadItemsForPO(e.target.value));
+  loadItemsForPO(document.getElementById('retPoSelect').value);
+
+  document.querySelector('.modal-footer').innerHTML = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-danger" id="retSave">Process Return</button>`;
+  document.getElementById('retSave').addEventListener('click', async () => {
+    const poId = document.getElementById('retPoSelect').value;
+    const items = Array.from(document.querySelectorAll('[data-ret-item]'))
+      .map(inp => ({ purchase_item_id: +inp.dataset.retItem, quantity: +inp.value || 0 }))
+      .filter(it => it.quantity > 0);
+
+    if (!items.length) { showToast('Enter a quantity for at least one item', 'error'); return; }
+
+    const payload = { items, reason: document.getElementById('retReason').value || null };
+    const btn = document.getElementById('retSave');
+    btn.disabled = true;
+    try {
+      await apiFetch(`/catalog/purchases/${poId}/return`, { method: 'POST', body: payload });
+    } catch (e) {
+      btn.disabled = false;
+      showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error');
+      return;
+    }
+
+    modal.hide();
+    renderReturnsTable(1);
+    showToast('Return processed successfully', 'success');
+  });
 }

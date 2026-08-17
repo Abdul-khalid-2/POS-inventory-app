@@ -40,6 +40,7 @@ class PurchaseResource extends JsonResource
                 'unit' => $item->product?->unit?->short_code,
                 'quantity' => $item->quantity,
                 'received_quantity' => $item->received_quantity,
+                'returned_quantity' => $item->returned_quantity,
                 'unit_cost' => (float) $item->unit_cost,
                 'tax' => (float) $item->tax,
                 'line_total' => (float) $item->line_total,

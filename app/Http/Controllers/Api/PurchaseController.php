@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PurchaseResource;
+use App\Http\Resources\StockMovementResource;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
 use App\Models\StockMovement;
+use App\Models\Supplier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -20,9 +22,9 @@ class PurchaseController extends Controller implements HasMiddleware
     public static function middleware(): array
     {
         return [
-            new Middleware('module:purchases', only: ['index', 'show']),
+            new Middleware('module:purchases', only: ['index', 'show', 'returnsIndex']),
             new Middleware('module:purchases,add', only: ['store']),
-            new Middleware('module:purchases,edit', only: ['receive']),
+            new Middleware('module:purchases,edit', only: ['receive', 'returnItems']),
         ];
     }
 
@@ -222,6 +224,118 @@ class PurchaseController extends Controller implements HasMiddleware
         });
 
         return (new PurchaseResource($purchase->fresh()->load(['supplier', 'creator', 'items.product.unit'])))->response();
+    }
+
+    /**
+     * POST /catalog/purchases/{purchase}/return — returns goods TO
+     * the supplier (defective, wrong item, etc.), the inverse of
+     * receive(). Genuinely per-item, unlike Sale's whole-order refund
+     * — a supplier delivery of 100 units with 3 defective ones is the
+     * normal case, not the exception, so this doesn't reuse that
+     * simpler pattern.
+     *
+     * A line can only return up to (received_quantity -
+     * returned_quantity) — you can't return what was never received,
+     * or what's already been returned once. It also can't exceed the
+     * product's current_stock: if some of that received stock has
+     * already been sold, it physically isn't here to send back
+     * anymore, matching the same "never let stock go negative"
+     * principle as everywhere else stock actually moves.
+     */
+    public function returnItems(Request $request, Purchase $purchase): JsonResponse
+    {
+        if (! in_array($purchase->status, ['received', 'partially_received'], true)) {
+            abort(422, "Nothing has been received on this purchase order yet, so there's nothing to return.");
+        }
+
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.purchase_item_id' => ['required', 'distinct', 'exists:purchase_items,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:0'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        DB::transaction(function () use ($data, $purchase, $request) {
+            $purchaseItems = PurchaseItem::where('purchase_id', $purchase->id)
+                ->whereIn('id', collect($data['items'])->pluck('purchase_item_id'))
+                ->get()
+                ->keyBy('id');
+
+            $totalReturnValue = 0;
+
+            foreach ($data['items'] as $item) {
+                $qty = $item['quantity'];
+                if ($qty <= 0) {
+                    continue;
+                }
+
+                $purchaseItem = $purchaseItems[$item['purchase_item_id']];
+                $returnable = $purchaseItem->received_quantity - $purchaseItem->returned_quantity;
+
+                if ($qty > $returnable) {
+                    throw ValidationException::withMessages([
+                        'items' => "Can't return {$qty} of {$purchaseItem->product->name} — only {$returnable} eligible (received minus already returned).",
+                    ]);
+                }
+
+                $product = Product::whereKey($purchaseItem->product_id)->lockForUpdate()->first();
+
+                if ($qty > $product->current_stock) {
+                    throw ValidationException::withMessages([
+                        'items' => "Can't return {$qty} of {$product->name} — only {$product->current_stock} still in stock (some of this delivery may already be sold).",
+                    ]);
+                }
+
+                $newStock = $product->current_stock - $qty;
+                $product->update(['current_stock' => $newStock]);
+
+                StockMovement::create([
+                    'product_id' => $product->id,
+                    'type' => 'return_out',
+                    'quantity' => $qty,
+                    'balance_after' => $newStock,
+                    'reference_type' => Purchase::class,
+                    'reference_id' => $purchase->id,
+                    'user_id' => $request->user()->id,
+                    'reason' => $data['reason'] ?? null,
+                ]);
+
+                $purchaseItem->update(['returned_quantity' => $purchaseItem->returned_quantity + $qty]);
+
+                $totalReturnValue += round($qty * (float) $purchaseItem->unit_cost, 2);
+            }
+
+            // Reduces what's still owed to the supplier for this PO —
+            // capped at what's actually still due. If the PO was
+            // already paid in full, this doesn't create a
+            // money-owed-back-to-us record; that's a real accounting
+            // event outside what a stock return covers (same scoping
+            // call as Sale::refund() not reversing Payment rows).
+            if ($totalReturnValue > 0 && $purchase->due_amount > 0) {
+                $reduction = min($totalReturnValue, (float) $purchase->due_amount);
+                $purchase->decrement('due_amount', $reduction);
+                Supplier::whereKey($purchase->supplier_id)->decrement('current_balance', $reduction);
+            }
+        });
+
+        return (new PurchaseResource($purchase->fresh()->load(['supplier', 'creator', 'items.product.unit'])))->response();
+    }
+
+    /**
+     * GET /catalog/purchases/returns — every return_out movement, for
+     * the Purchase Returns tab. No separate "returns" table exists;
+     * stock_movements is already the real, accurate record of every
+     * return that happened, so this reads from there rather than
+     * duplicating that data into a new table.
+     */
+    public function returnsIndex(Request $request): JsonResponse
+    {
+        $returns = StockMovement::where('type', 'return_out')
+            ->with(['product.unit', 'user', 'reference'])
+            ->latest()
+            ->paginate($request->integer('per_page', 15));
+
+        return StockMovementResource::collection($returns)->response();
     }
 
     /**

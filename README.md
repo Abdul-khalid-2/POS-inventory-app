@@ -600,7 +600,42 @@ items off as we complete them so it always reflects real project status.
       modal now all read/write real data. The "Print PO" button stays
       an honest "not built yet" toast — that wasn't part of this
       checklist item and Sales' real PDF work doesn't extend here yet.
-- [ ] Purchase returns
+- [x] Purchase returns — `POST /catalog/purchases/{purchase}/return`
+      (`PurchaseController::returnItems`), gated `purchases:edit`
+      like receiving is. **Genuinely per-item**, unlike Sale's
+      whole-order refund — this needed a new
+      `purchase_items.returned_quantity` column (migration
+      `2025_02_01_000001`) tracked separately from
+      `received_quantity`, since a 100-unit delivery with 3 defective
+      units is the normal case for a supplier return, not the
+      exception, and reusing the sales pattern here would have been
+      the wrong shape for the problem.
+      - A line can only return up to `received_quantity -
+        returned_quantity` — can't return what was never received, or
+        what's already been returned once.
+      - Also can't exceed the product's *current* stock: if some of
+        that delivery was already sold, it physically isn't here to
+        send back — same "never let stock go negative" principle as
+        every other stock-moving endpoint, applied to a case where it
+        actually matters (returning inventory that's already gone).
+      - Writes real `stock_movements` rows using the `return_out`
+        type — sitting unused since Phase 1, same as `return_in` was
+        before Phase 6's refund work picked it up.
+      - Reduces what's still owed to the supplier for that PO (capped
+        at what's actually due) and the supplier's `current_balance`
+        to match. Deliberately doesn't create a money-owed-back
+        record if the PO was already paid in full — same scoping call
+        as `Sale::refund()` not reversing `Payment` rows; that's a
+        real accounting event outside what a stock return covers.
+      - No dedicated `returns` table — extended `StockMovementResource`
+        with a generic `reference` field (Sale or Purchase, whichever
+        applies) and added `GET /catalog/purchases/returns`, which
+        just reads the real `return_out` movements that already exist
+        rather than duplicating that data into a new table.
+      - `purchases.js`'s Purchase Returns tab — a static placeholder
+        with no logic at all before this — now has a real "New
+        Return" flow and a real history table.
+      This closes out Phase 7 entirely.
 
 ### Phase 8 — People (Customers, Suppliers, Staff)
 - [ ] Real CRUD for customers, suppliers, staff
