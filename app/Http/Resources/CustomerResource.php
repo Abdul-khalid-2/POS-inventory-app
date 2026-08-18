@@ -14,7 +14,11 @@ class CustomerResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'phone' => $this->phone,
+            'email' => $this->email,
+            'address' => $this->address,
             'current_balance' => (float) $this->current_balance,
+            'total_purchases' => (float) ($this->total_purchases ?? 0),
+            'status' => $this->status,
         ];
     }
 }

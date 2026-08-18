@@ -1,28 +1,43 @@
-/* People Management View — Customers, Suppliers, Staff, Roles */
+/* People View — real CRUD for Customers, Suppliers, and Staff, wired
+   to /catalog/{customers,suppliers,staff}. Roles tab intentionally
+   left as display-only mock data — role/permission-matrix editing
+   isn't part of this checklist item (it's Settings-screen territory).
+   Ledger/detail views for customers and suppliers, and "Record
+   Payment", are their own upcoming roadmap items — stubbed here with
+   an honest toast rather than a silently broken mock lookup. */
 
-let peopleState = { subTab: 'customers', page: 1, perPage: 10, search: '' };
+let peopleState = { subTab: 'customers', page: 1, perPage: 10, search: '', status: 'all' };
+let peopleRoles = [];
 
-registerView('people', function() {
-  breadcrumb([{ label: 'Home', view: 'dashboard' }, { label: 'Customers & Suppliers' }]);
+registerView('people', async function() {
+  breadcrumb([{ label: 'Home', view: 'dashboard' }, { label: 'People' }]);
   peopleState.page = 1;
+
   const html = `
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <div><h1 class="page-title">People Management</h1><div class="subtitle">Manage customers, suppliers, staff, and roles</div></div>
+      <div><h1 class="page-title">People</h1><div class="subtitle">Manage customers, suppliers, staff, and roles</div></div>
     </div>
     <ul class="nav nav-tabs mb-3">
       <li class="nav-item"><button class="nav-link active" data-ptab="customers">Customers</button></li>
       <li class="nav-item"><button class="nav-link" data-ptab="suppliers">Suppliers</button></li>
-      <li class="nav-item"><button class="nav-link" data-ptab="staff">Staff / Employees</button></li>
-      <li class="nav-item"><button class="nav-link" data-ptab="roles">Roles & Permissions</button></li>
+      <li class="nav-item"><button class="nav-link" data-ptab="staff">Staff</button></li>
+      <li class="nav-item"><button class="nav-link" data-ptab="roles">Roles &amp; Permissions</button></li>
     </ul>
-    <div id="peopleTabContent"></div>
-  `;
+    <div id="peopleTabContent"></div>`;
   document.getElementById('content').innerHTML = html;
+
+  try {
+    const rolesRes = await apiFetch('/catalog/roles');
+    peopleRoles = rolesRes.data;
+  } catch (e) { /* staff form's role dropdown just shows empty — non-fatal for other tabs */ }
+
   document.querySelectorAll('[data-ptab]').forEach(t => t.addEventListener('click', () => {
     document.querySelectorAll('[data-ptab]').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     peopleState.subTab = t.dataset.ptab;
     peopleState.page = 1;
+    peopleState.search = '';
+    peopleState.status = 'all';
     renderPeopleTab();
   }));
   renderPeopleTab();
@@ -36,234 +51,373 @@ function renderPeopleTab() {
   else renderRoles(c);
 }
 
+/* ===================== Customers ===================== */
+
 function renderCustomers(c) {
   c.innerHTML = `
     <div class="toolbar">
-      <div class="search-box"><i class="bi bi-search"></i><input type="text" class="form-control" id="custSearch" placeholder="Search customers…"></div>
+      <div class="search-box"><i class="bi bi-search"></i><input type="text" class="form-control" id="custSearch" placeholder="Search customers…" value="${peopleState.search}"></div>
+      <select class="form-select form-select-sm" id="custStatus" style="width:auto;">
+        <option value="all">All Status</option>
+        <option value="active" ${peopleState.status === 'active' ? 'selected' : ''}>Active</option>
+        <option value="inactive" ${peopleState.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+      </select>
       <div class="toolbar-spacer"></div>
-      <button class="btn btn-outline-secondary btn-sm" id="custExport"><i class="bi bi-download me-1"></i>Export</button>
-      <button class="btn btn-primary btn-sm" id="addCust"><i class="bi bi-plus-lg me-1"></i>Add Customer</button>
+      <button class="btn btn-primary btn-sm" id="addCustomer"><i class="bi bi-plus-lg me-1"></i>Add Customer</button>
     </div>
     <div class="card table-card">
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-hover">
-            <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Total Purchases</th><th>Outstanding Due</th><th>Loyalty Points</th><th>Type</th><th class="text-end">Actions</th></tr></thead>
-            <tbody id="custTableBody"></tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover">
+        <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Total Purchases</th><th>Balance Due</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+        <tbody id="custTableBody"></tbody>
+      </table></div></div>
       <div class="card-body d-flex justify-content-between align-items-center" id="custPagination"></div>
     </div>`;
-  document.getElementById('custSearch').addEventListener('input', e => { peopleState.search = e.target.value; peopleState.page = 1; renderCustTable(); });
-  document.getElementById('addCust').addEventListener('click', () => customerModal());
-  document.getElementById('custExport').addEventListener('click', () => {
-    exportCSV('customers.csv', ['Name','Phone','Email','Total Purchases','Due','Loyalty Points','Type'],
-      CUSTOMERS.filter(c=>c.id!=='c001').map(c => [c.name, c.phone, c.email, c.totalPurchases, c.due, c.loyaltyPoints, c.type]));
-  });
+  document.getElementById('custSearch').addEventListener('input', debounce(e => { peopleState.search = e.target.value; peopleState.page = 1; renderCustTable(); }, 350));
+  document.getElementById('custStatus').addEventListener('change', e => { peopleState.status = e.target.value; peopleState.page = 1; renderCustTable(); });
+  document.getElementById('addCustomer').addEventListener('click', () => customerFormModal());
   renderCustTable();
 }
 
-function renderCustTable() {
-  let items = CUSTOMERS.filter(c => c.id !== 'c001');
-  if (peopleState.search) { const q = peopleState.search.toLowerCase(); items = items.filter(c => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q)); }
-  const paged = paginate(items, peopleState.page, peopleState.perPage);
+async function renderCustTable() {
   const body = document.getElementById('custTableBody');
-  if (!items.length) body.innerHTML = `<tr><td colspan="8">${emptyState('bi-people','No customers found','Try a different search.')}</td></tr>`;
-  else body.innerHTML = paged.map(c => `
-    <tr class="cursor-pointer" data-cust-detail="${c.id}">
-      <td><div class="d-flex align-items-center gap-2"><div class="topbar-avatar" style="background:linear-gradient(135deg,var(--brand-300),var(--brand-500));">${avatarLetter(c.name)}</div><span class="fw-600">${c.name}</span></div></td>
-      <td>${c.phone}</td><td>${c.email}</td><td class="text-money">${fmtMoney(c.totalPurchases)}</td>
-      <td class="text-money ${c.due>0?'text-danger fw-600':''}">${fmtMoney(c.due)}</td>
-      <td><span class="badge bg-soft-primary">${c.loyaltyPoints}</span></td>
-      <td><span class="badge bg-soft-${c.type==='vip'?'warning':'secondary'}">${c.type}</span></td>
-      <td class="text-end" onclick="event.stopPropagation()">
-        <div class="table-actions">
-          <button class="icon-btn" data-cust-detail="${c.id}" title="View"><i class="bi bi-eye"></i></button>
-          <button class="icon-btn" data-edit-cust="${c.id}" title="Edit"><i class="bi bi-pencil"></i></button>
-          <button class="icon-btn danger" data-del-cust="${c.id}" title="Delete"><i class="bi bi-trash"></i></button>
-        </div>
-      </td>
-    </tr>`).join('');
-  body.querySelectorAll('[data-cust-detail]').forEach(b => b.addEventListener('click', () => showCustomerDetail(b.dataset.custDetail)));
-  body.querySelectorAll('[data-edit-cust]').forEach(b => b.addEventListener('click', () => customerModal(b.dataset.editCust)));
-  body.querySelectorAll('[data-del-cust]').forEach(b => b.addEventListener('click', () => {
-    const c = CUSTOMERS.find(x => x.id === b.dataset.delCust);
-    confirmModal('Delete Customer', `Delete <strong>${c.name}</strong>?`, () => { const idx = CUSTOMERS.findIndex(x=>x.id===c.id); if(idx>=0) CUSTOMERS.splice(idx,1); renderCustTable(); showToast('Customer deleted', 'success'); });
+  body.innerHTML = skeletonRows(5, 7);
+  const params = new URLSearchParams({ page: peopleState.page, per_page: peopleState.perPage });
+  if (peopleState.search) params.set('q', peopleState.search);
+  if (peopleState.status !== 'all') params.set('status', peopleState.status);
+
+  let result;
+  try {
+    result = await apiFetch(`/catalog/customers?${params}`);
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7">${emptyState('bi-exclamation-triangle', "Couldn't load customers", e.message)}</td></tr>`;
+    return;
+  }
+
+  const items = result.data, meta = result.meta;
+  body.innerHTML = items.length ? items.map(cust => `
+    <tr>
+      <td><span class="fw-600">${cust.name}</span></td>
+      <td>${cust.phone || '—'}</td><td>${cust.email || '—'}</td>
+      <td class="text-money">${fmtMoney(cust.total_purchases)}</td>
+      <td class="text-money ${cust.current_balance > 0 ? 'text-danger fw-600' : ''}">${fmtMoney(cust.current_balance)}</td>
+      <td>${statusBadge(cust.status)}</td>
+      <td class="text-end"><div class="table-actions">
+        <button class="icon-btn" data-cust-view="${cust.id}" title="View"><i class="bi bi-eye"></i></button>
+        <button class="icon-btn" data-cust-edit="${cust.id}" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="icon-btn danger" data-cust-del="${cust.id}" title="Delete"><i class="bi bi-trash"></i></button>
+      </div></td>
+    </tr>`).join('') : `<tr><td colspan="7">${emptyState('bi-people', 'No customers found', 'Try a different search, or add a new customer.')}</td></tr>`;
+
+  body.querySelectorAll('[data-cust-view]').forEach(b => b.addEventListener('click', () => showToast('Customer purchase history & ledger are coming in the next step.', 'info')));
+  body.querySelectorAll('[data-cust-edit]').forEach(b => b.addEventListener('click', () => customerFormModal(items.find(x => String(x.id) === b.dataset.custEdit))));
+  body.querySelectorAll('[data-cust-del]').forEach(b => b.addEventListener('click', () => {
+    const cust = items.find(x => String(x.id) === b.dataset.custDel);
+    confirmModal('Delete Customer', `Delete <strong>${cust.name}</strong>?`, async () => {
+      try {
+        await apiFetch(`/catalog/customers/${cust.id}`, { method: 'DELETE' });
+        showToast('Customer deleted', 'success');
+        renderCustTable();
+      } catch (e) { showToast(e.message, 'error'); }
+    });
   }));
+
   const pag = document.getElementById('custPagination');
-  pag.innerHTML = `<div class="small text-muted">${items.length} customers</div>${renderPagination(items.length, peopleState.page, peopleState.perPage, p=>{peopleState.page=p;renderCustTable();})}`;
+  pag.innerHTML = `<div class="small text-muted">${meta.total} customers</div>${renderPagination(meta.total, meta.current_page, meta.per_page, p => { peopleState.page = p; renderCustTable(); })}`;
   attachPaginationClicks(pag, p => { peopleState.page = p; renderCustTable(); });
 }
 
-function customerModal(id) {
-  const c = id ? CUSTOMERS.find(x => x.id === id) : null;
+function customerFormModal(cust) {
   const body = `<form id="custForm">
-    <div class="row g-3">
-      <div class="col-md-6"><label class="form-label">Name *</label><input type="text" class="form-control" id="cf_name" value="${c?.name||''}" required></div>
-      <div class="col-md-6"><label class="form-label">Phone</label><input type="text" class="form-control" id="cf_phone" value="${c?.phone||''}"></div>
-      <div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" id="cf_email" value="${c?.email||''}"></div>
-      <div class="col-md-6"><label class="form-label">Type</label><select class="form-select" id="cf_type"><option value="regular" ${c?.type==='regular'?'selected':''}>Regular</option><option value="vip" ${c?.type==='vip'?'selected':''}>VIP</option></select></div>
-      <div class="col-12"><label class="form-label">Address</label><textarea class="form-control" id="cf_address" rows="2">${c?.address||''}</textarea></div>
+    <div class="mb-3"><label class="form-label">Name *</label><input type="text" class="form-control" id="cf_name" value="${cust?.name || ''}" required></div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><label class="form-label">Phone</label><input type="text" class="form-control" id="cf_phone" value="${cust?.phone || ''}"></div>
+      <div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" id="cf_email" value="${cust?.email || ''}"></div>
     </div>
+    <div class="mb-3"><label class="form-label">Address</label><textarea class="form-control" id="cf_address" rows="2">${cust?.address || ''}</textarea></div>
+    <div class="mb-3"><label class="form-label">Status</label><select class="form-select" id="cf_status">
+      <option value="active" ${(!cust || cust?.status === 'active') ? 'selected' : ''}>Active</option>
+      <option value="inactive" ${cust?.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+    </select></div>
   </form>`;
-  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="cf_save">${c?'Update':'Add'} Customer</button>`;
-  const modal = formModal(c ? 'Edit Customer' : 'Add Customer', body, footer);
-  document.getElementById('cf_save').addEventListener('click', () => {
+  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="cf_save">${cust ? 'Update' : 'Add'} Customer</button>`;
+  const modal = formModal(cust ? 'Edit Customer' : 'Add Customer', body, footer);
+  document.getElementById('cf_save').addEventListener('click', async () => {
     const name = document.getElementById('cf_name').value.trim();
     if (!name) { document.getElementById('cf_name').classList.add('is-invalid'); return; }
-    const data = { name, phone: document.getElementById('cf_phone').value, email: document.getElementById('cf_email').value, type: document.getElementById('cf_type').value, address: document.getElementById('cf_address').value };
-    if (c) { Object.assign(c, data); showToast('Customer updated', 'success'); }
-    else { CUSTOMERS.push({ id: 'c'+Date.now(), totalPurchases: 0, due: 0, loyaltyPoints: 0, ...data }); showToast('Customer added', 'success'); }
-    modal.hide(); renderCustTable();
+    const payload = {
+      name,
+      phone: document.getElementById('cf_phone').value || null,
+      email: document.getElementById('cf_email').value || null,
+      address: document.getElementById('cf_address').value || null,
+      status: document.getElementById('cf_status').value,
+    };
+    try {
+      if (cust) await apiFetch(`/catalog/customers/${cust.id}`, { method: 'PUT', body: payload });
+      else await apiFetch('/catalog/customers', { method: 'POST', body: payload });
+      showToast(cust ? 'Customer updated' : 'Customer added', 'success');
+      modal.hide();
+      renderCustTable();
+    } catch (e) { showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error'); }
   });
 }
 
-function showCustomerDetail(id) {
-  const c = CUSTOMERS.find(x => x.id === id);
-  const sales = SALES.filter(s => s.customerId === id).slice(0, 10);
-  const body = `<div class="row mb-3">
-    <div class="col-md-6"><div class="d-flex align-items-center gap-3"><div class="topbar-avatar" style="width:48px;height:48px;font-size:18px;background:linear-gradient(135deg,var(--brand-300),var(--brand-500));">${avatarLetter(c.name)}</div><div><h5 class="fw-700">${c.name}</h5><div class="small text-muted">${c.email} · ${c.phone}</div><span class="badge bg-soft-${c.type==='vip'?'warning':'secondary'} mt-1">${c.type}</span></div></div></div>
-    <div class="col-md-6"><div class="row text-end">
-      <div class="col-4"><div class="small text-muted">Total Purchases</div><div class="fw-700">${fmtMoney(c.totalPurchases)}</div></div>
-      <div class="col-4"><div class="small text-muted">Outstanding Due</div><div class="fw-700 ${c.due>0?'text-danger':''}">${fmtMoney(c.due)}</div></div>
-      <div class="col-4"><div class="small text-muted">Loyalty Points</div><div class="fw-700">${c.loyaltyPoints}</div></div>
-    </div></div>
-  </div>
-  <h6 class="fw-700 mb-2">Purchase History</h6>
-  <table class="table table-sm"><thead><tr><th>Invoice</th><th>Date</th><th>Total</th><th>Status</th></tr></thead><tbody>
-  ${sales.map(s=>`<tr><td>${s.invoice}</td><td>${fmtDate(s.date)}</td><td>${fmtMoney(s.total)}</td><td>${statusBadge(s.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">No purchases</td></tr>'}
-  </tbody></table>`;
-  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Close</button>${c.due>0?`<button class="btn btn-primary" id="recordPayCust"><i class="bi bi-cash me-1"></i>Record Payment</button>`:''}`;
-  const modal = formModal('Customer Profile — ' + c.name, body, footer, 'lg');
-  document.getElementById('recordPayCust')?.addEventListener('click', () => { c.due = 0; modal.hide(); renderCustTable(); showToast('Payment recorded — due cleared', 'success'); });
-}
+/* ===================== Suppliers ===================== */
 
 function renderSuppliers(c) {
   c.innerHTML = `
     <div class="toolbar">
-      <div class="search-box"><i class="bi bi-search"></i><input type="text" class="form-control" id="supSearch" placeholder="Search suppliers…"></div>
+      <div class="search-box"><i class="bi bi-search"></i><input type="text" class="form-control" id="suppSearch" placeholder="Search suppliers…" value="${peopleState.search}"></div>
+      <select class="form-select form-select-sm" id="suppStatus" style="width:auto;">
+        <option value="all">All Status</option>
+        <option value="active" ${peopleState.status === 'active' ? 'selected' : ''}>Active</option>
+        <option value="inactive" ${peopleState.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+      </select>
       <div class="toolbar-spacer"></div>
-      <button class="btn btn-primary btn-sm" id="addSup"><i class="bi bi-plus-lg me-1"></i>Add Supplier</button>
+      <button class="btn btn-primary btn-sm" id="addSupplier"><i class="bi bi-plus-lg me-1"></i>Add Supplier</button>
     </div>
     <div class="card table-card">
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-hover">
-            <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Total Purchases</th><th>Payable</th><th class="text-end">Actions</th></tr></thead>
-            <tbody id="supTableBody"></tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover">
+        <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Total Purchases</th><th>Payable</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+        <tbody id="suppTableBody"></tbody>
+      </table></div></div>
+      <div class="card-body d-flex justify-content-between align-items-center" id="suppPagination"></div>
     </div>`;
-  document.getElementById('supSearch').addEventListener('input', e => renderSupTable(e.target.value));
-  document.getElementById('addSup').addEventListener('click', () => supplierModal());
-  renderSupTable('');
+  document.getElementById('suppSearch').addEventListener('input', debounce(e => { peopleState.search = e.target.value; peopleState.page = 1; renderSuppTable(); }, 350));
+  document.getElementById('suppStatus').addEventListener('change', e => { peopleState.status = e.target.value; peopleState.page = 1; renderSuppTable(); });
+  document.getElementById('addSupplier').addEventListener('click', () => supplierFormModal());
+  renderSuppTable();
 }
 
-function renderSupTable(search) {
-  let items = [...SUPPLIERS];
-  if (search) { const q = search.toLowerCase(); items = items.filter(s => s.name.toLowerCase().includes(q) || s.contact.toLowerCase().includes(q)); }
-  document.getElementById('supTableBody').innerHTML = items.map(s => `
+async function renderSuppTable() {
+  const body = document.getElementById('suppTableBody');
+  body.innerHTML = skeletonRows(5, 7);
+  const params = new URLSearchParams({ page: peopleState.page, per_page: peopleState.perPage });
+  if (peopleState.search) params.set('q', peopleState.search);
+  if (peopleState.status !== 'all') params.set('status', peopleState.status);
+
+  let result;
+  try {
+    result = await apiFetch(`/catalog/suppliers?${params}`);
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7">${emptyState('bi-exclamation-triangle', "Couldn't load suppliers", e.message)}</td></tr>`;
+    return;
+  }
+
+  const items = result.data, meta = result.meta;
+  body.innerHTML = items.length ? items.map(s => `
     <tr>
-      <td class="fw-600">${s.name}</td><td>${s.contact}</td><td>${s.phone}</td><td>${s.email}</td>
-      <td class="text-money">${fmtMoney(s.totalPurchases)}</td>
-      <td class="text-money ${s.payable>0?'text-danger fw-600':''}">${fmtMoney(s.payable)}</td>
-      <td class="text-end"><div class="table-actions"><button class="icon-btn" data-edit-sup="${s.id}"><i class="bi bi-pencil"></i></button><button class="icon-btn danger" data-del-sup="${s.id}"><i class="bi bi-trash"></i></button></div></td>
-    </tr>`).join('') || `<tr><td colspan="7">${emptyState('bi-truck','No suppliers found','')}</td></tr>`;
-  document.querySelectorAll('[data-edit-sup]').forEach(b => b.addEventListener('click', () => supplierModal(b.dataset.editSup)));
-  document.querySelectorAll('[data-del-sup]').forEach(b => b.addEventListener('click', () => {
-    const s = SUPPLIERS.find(x => x.id === b.dataset.delSup);
-    confirmModal('Delete Supplier', `Delete <strong>${s.name}</strong>?`, () => { const idx = SUPPLIERS.findIndex(x=>x.id===s.id); if(idx>=0) SUPPLIERS.splice(idx,1); renderSupTable(document.getElementById('supSearch').value); showToast('Supplier deleted', 'success'); });
+      <td class="fw-600">${s.name}</td><td>${s.contact_person || '—'}</td><td>${s.phone || '—'}</td>
+      <td class="text-money">${fmtMoney(s.total_purchases)}</td>
+      <td class="text-money ${s.current_balance > 0 ? 'text-danger fw-600' : ''}">${fmtMoney(s.current_balance)}</td>
+      <td>${statusBadge(s.status)}</td>
+      <td class="text-end"><div class="table-actions">
+        <button class="icon-btn" data-supp-view="${s.id}" title="View"><i class="bi bi-eye"></i></button>
+        <button class="icon-btn" data-supp-edit="${s.id}" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="icon-btn danger" data-supp-del="${s.id}" title="Delete"><i class="bi bi-trash"></i></button>
+      </div></td>
+    </tr>`).join('') : `<tr><td colspan="7">${emptyState('bi-truck', 'No suppliers found', 'Try a different search, or add a new supplier.')}</td></tr>`;
+
+  body.querySelectorAll('[data-supp-view]').forEach(b => b.addEventListener('click', () => showToast('Supplier purchase history & ledger are coming in the next step.', 'info')));
+  body.querySelectorAll('[data-supp-edit]').forEach(b => b.addEventListener('click', () => supplierFormModal(items.find(x => String(x.id) === b.dataset.suppEdit))));
+  body.querySelectorAll('[data-supp-del]').forEach(b => b.addEventListener('click', () => {
+    const s = items.find(x => String(x.id) === b.dataset.suppDel);
+    confirmModal('Delete Supplier', `Delete <strong>${s.name}</strong>?`, async () => {
+      try {
+        await apiFetch(`/catalog/suppliers/${s.id}`, { method: 'DELETE' });
+        showToast('Supplier deleted', 'success');
+        renderSuppTable();
+      } catch (e) { showToast(e.message, 'error'); }
+    });
   }));
+
+  const pag = document.getElementById('suppPagination');
+  pag.innerHTML = `<div class="small text-muted">${meta.total} suppliers</div>${renderPagination(meta.total, meta.current_page, meta.per_page, p => { peopleState.page = p; renderSuppTable(); })}`;
+  attachPaginationClicks(pag, p => { peopleState.page = p; renderSuppTable(); });
 }
 
-function supplierModal(id) {
-  const s = id ? SUPPLIERS.find(x => x.id === id) : null;
-  const body = `<form id="supForm"><div class="row g-3">
-    <div class="col-md-6"><label class="form-label">Name *</label><input type="text" class="form-control" id="sf_name" value="${s?.name||''}" required></div>
-    <div class="col-md-6"><label class="form-label">Contact Person</label><input type="text" class="form-control" id="sf_contact" value="${s?.contact||''}"></div>
-    <div class="col-md-6"><label class="form-label">Phone</label><input type="text" class="form-control" id="sf_phone" value="${s?.phone||''}"></div>
-    <div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" id="sf_email" value="${s?.email||''}"></div>
-    <div class="col-12"><label class="form-label">Address</label><textarea class="form-control" id="sf_address" rows="2">${s?.address||''}</textarea></div>
-  </div></form>`;
-  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="sf_save">${s?'Update':'Add'} Supplier</button>`;
+function supplierFormModal(s) {
+  const body = `<form id="suppForm">
+    <div class="mb-3"><label class="form-label">Company Name *</label><input type="text" class="form-control" id="sf_name" value="${s?.name || ''}" required></div>
+    <div class="mb-3"><label class="form-label">Contact Person</label><input type="text" class="form-control" id="sf_contact" value="${s?.contact_person || ''}"></div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><label class="form-label">Phone</label><input type="text" class="form-control" id="sf_phone" value="${s?.phone || ''}"></div>
+      <div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" id="sf_email" value="${s?.email || ''}"></div>
+    </div>
+    <div class="mb-3"><label class="form-label">Address</label><textarea class="form-control" id="sf_address" rows="2">${s?.address || ''}</textarea></div>
+    <div class="mb-3"><label class="form-label">Status</label><select class="form-select" id="sf_status">
+      <option value="active" ${(!s || s?.status === 'active') ? 'selected' : ''}>Active</option>
+      <option value="inactive" ${s?.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+    </select></div>
+  </form>`;
+  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="sf_save">${s ? 'Update' : 'Add'} Supplier</button>`;
   const modal = formModal(s ? 'Edit Supplier' : 'Add Supplier', body, footer);
-  document.getElementById('sf_save').addEventListener('click', () => {
+  document.getElementById('sf_save').addEventListener('click', async () => {
     const name = document.getElementById('sf_name').value.trim();
     if (!name) { document.getElementById('sf_name').classList.add('is-invalid'); return; }
-    const data = { name, contact: document.getElementById('sf_contact').value, phone: document.getElementById('sf_phone').value, email: document.getElementById('sf_email').value, address: document.getElementById('sf_address').value };
-    if (s) { Object.assign(s, data); showToast('Supplier updated', 'success'); }
-    else { SUPPLIERS.push({ id: 's'+Date.now(), totalPurchases: 0, payable: 0, ...data }); showToast('Supplier added', 'success'); }
-    modal.hide(); renderSupTable(document.getElementById('supSearch').value);
+    const payload = {
+      name,
+      contact_person: document.getElementById('sf_contact').value || null,
+      phone: document.getElementById('sf_phone').value || null,
+      email: document.getElementById('sf_email').value || null,
+      address: document.getElementById('sf_address').value || null,
+      status: document.getElementById('sf_status').value,
+    };
+    try {
+      if (s) await apiFetch(`/catalog/suppliers/${s.id}`, { method: 'PUT', body: payload });
+      else await apiFetch('/catalog/suppliers', { method: 'POST', body: payload });
+      showToast(s ? 'Supplier updated' : 'Supplier added', 'success');
+      modal.hide();
+      renderSuppTable();
+    } catch (e) { showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error'); }
   });
 }
+
+/* ===================== Staff ===================== */
 
 function renderStaff(c) {
   c.innerHTML = `
-    <div class="toolbar"><div class="toolbar-spacer"></div><button class="btn btn-primary btn-sm" id="addStaff"><i class="bi bi-plus-lg me-1"></i>Add Staff</button></div>
-    <div class="card table-card"><div class="card-body p-0">
-      <div class="table-responsive"><table class="table table-hover">
+    <div class="toolbar">
+      <div class="search-box"><i class="bi bi-search"></i><input type="text" class="form-control" id="staffSearch" placeholder="Search staff…" value="${peopleState.search}"></div>
+      <select class="form-select form-select-sm" id="staffStatus" style="width:auto;">
+        <option value="all">All Status</option>
+        <option value="active" ${peopleState.status === 'active' ? 'selected' : ''}>Active</option>
+        <option value="inactive" ${peopleState.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+      </select>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary btn-sm" id="addStaff"><i class="bi bi-plus-lg me-1"></i>Add Staff</button>
+    </div>
+    <div class="card table-card">
+      <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover">
         <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
-        <tbody>
-          ${USERS.map(u => `<tr>
-            <td><div class="d-flex align-items-center gap-2"><div class="topbar-avatar">${u.avatar}</div><span class="fw-600">${u.name}</span></div></td>
-            <td>${u.email}</td><td>${u.phone}</td><td><span class="badge bg-soft-primary">${u.role}</span></td>
-            <td>${statusBadge(u.status)}</td>
-            <td class="text-end"><div class="table-actions"><button class="icon-btn" data-edit-staff="${u.id}"><i class="bi bi-pencil"></i></button><button class="icon-btn" data-reset-pw="${u.id}" title="Reset Password"><i class="bi bi-key"></i></button><button class="icon-btn danger" data-del-staff="${u.id}"><i class="bi bi-trash"></i></button></div></td>
-          </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div></div>`;
-  c.querySelector('#addStaff').addEventListener('click', () => staffModal());
-  c.querySelectorAll('[data-edit-staff]').forEach(b => b.addEventListener('click', () => staffModal(b.dataset.editStaff)));
-  c.querySelectorAll('[data-reset-pw]').forEach(b => b.addEventListener('click', () => showToast('Password reset link sent to ' + USERS.find(u=>u.id===b.dataset.resetPw)?.email, 'success')));
-  c.querySelectorAll('[data-del-staff]').forEach(b => b.addEventListener('click', () => {
-    const u = USERS.find(x => x.id === b.dataset.delStaff);
-    confirmModal('Delete Staff', `Delete <strong>${u.name}</strong>?`, () => { const idx = USERS.findIndex(x=>x.id===u.id); if(idx>=0) USERS.splice(idx,1); renderStaff(c); showToast('Staff deleted', 'success'); });
-  }));
+        <tbody id="staffTableBody"></tbody>
+      </table></div></div>
+      <div class="card-body d-flex justify-content-between align-items-center" id="staffPagination"></div>
+    </div>`;
+  document.getElementById('staffSearch').addEventListener('input', debounce(e => { peopleState.search = e.target.value; peopleState.page = 1; renderStaffTable(); }, 350));
+  document.getElementById('staffStatus').addEventListener('change', e => { peopleState.status = e.target.value; peopleState.page = 1; renderStaffTable(); });
+  document.getElementById('addStaff').addEventListener('click', () => staffFormModal());
+  renderStaffTable();
 }
 
-function staffModal(id) {
-  const u = id ? USERS.find(x => x.id === id) : null;
-  const body = `<form id="staffForm"><div class="row g-3">
-    <div class="col-md-6"><label class="form-label">Name *</label><input type="text" class="form-control" id="uf_name" value="${u?.name||''}" required></div>
-    <div class="col-md-6"><label class="form-label">Email *</label><input type="email" class="form-control" id="uf_email" value="${u?.email||''}" required></div>
-    <div class="col-md-6"><label class="form-label">Phone</label><input type="text" class="form-control" id="uf_phone" value="${u?.phone||''}"></div>
-    <div class="col-md-6"><label class="form-label">Role *</label><select class="form-select" id="uf_role">${ROLES.map(r=>`<option value="${r.name}" ${u?.role===r.name?'selected':''}>${r.name}</option>`).join('')}</select></div>
-    <div class="col-md-6"><label class="form-label">Status</label><select class="form-select" id="uf_status"><option value="active" ${u?.status==='active'?'selected':''}>Active</option><option value="inactive" ${u?.status==='inactive'?'selected':''}>Inactive</option></select></div>
-  </div></form>`;
-  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="uf_save">${u?'Update':'Add'} Staff</button>`;
-  const modal = formModal(u ? 'Edit Staff' : 'Add Staff', body, footer);
-  document.getElementById('uf_save').addEventListener('click', () => {
-    const name = document.getElementById('uf_name').value.trim();
-    const email = document.getElementById('uf_email').value.trim();
+async function renderStaffTable() {
+  const body = document.getElementById('staffTableBody');
+  body.innerHTML = skeletonRows(5, 6);
+  const params = new URLSearchParams({ page: peopleState.page, per_page: peopleState.perPage });
+  if (peopleState.search) params.set('q', peopleState.search);
+  if (peopleState.status !== 'all') params.set('status', peopleState.status);
+
+  let result;
+  try {
+    result = await apiFetch(`/catalog/staff?${params}`);
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6">${emptyState('bi-exclamation-triangle', "Couldn't load staff", e.message)}</td></tr>`;
+    return;
+  }
+
+  const items = result.data, meta = result.meta;
+  body.innerHTML = items.length ? items.map(u => `
+    <tr>
+      <td><span class="fw-600">${u.name}</span></td>
+      <td>${u.email}</td><td>${u.phone || '—'}</td><td>${u.role?.name || '—'}</td><td>${statusBadge(u.status)}</td>
+      <td class="text-end"><div class="table-actions">
+        <button class="icon-btn" data-staff-edit="${u.id}" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="icon-btn" data-reset-pw="${u.id}" title="Reset Password"><i class="bi bi-key"></i></button>
+        <button class="icon-btn danger" data-staff-del="${u.id}" title="Delete"><i class="bi bi-trash"></i></button>
+      </div></td>
+    </tr>`).join('') : `<tr><td colspan="6">${emptyState('bi-person-badge', 'No staff found', 'Try a different search, or add a new staff member.')}</td></tr>`;
+
+  body.querySelectorAll('[data-staff-edit]').forEach(b => b.addEventListener('click', () => staffFormModal(items.find(x => String(x.id) === b.dataset.staffEdit))));
+  body.querySelectorAll('[data-reset-pw]').forEach(b => b.addEventListener('click', () => {
+    const u = items.find(x => String(x.id) === b.dataset.resetPw);
+    confirmModal('Reset Password', `Generate a new temporary password for <strong>${u.name}</strong>? Their current password will stop working.`, async () => {
+      let result;
+      try {
+        result = await apiFetch(`/catalog/staff/${u.id}/reset-password`, { method: 'POST' });
+      } catch (e) { showToast(e.message, 'error'); return; }
+      formModal('Password Reset', `
+        <p>New temporary password for <strong>${u.name}</strong>:</p>
+        <div class="border rounded p-3 text-center fw-700 fs-5" style="font-family:monospace;letter-spacing:2px;">${result.temporary_password}</div>
+        <p class="small text-muted mt-2">Share this with them directly — it won't be shown again. There's no email delivery set up yet.</p>
+      `, `<button class="btn btn-primary" data-bs-dismiss="modal">Done</button>`);
+    }, 'Reset');
+  }));
+  body.querySelectorAll('[data-staff-del]').forEach(b => b.addEventListener('click', () => {
+    const u = items.find(x => String(x.id) === b.dataset.staffDel);
+    confirmModal('Delete Staff', `Delete <strong>${u.name}</strong>?`, async () => {
+      try {
+        await apiFetch(`/catalog/staff/${u.id}`, { method: 'DELETE' });
+        showToast('Staff member deleted', 'success');
+        renderStaffTable();
+      } catch (e) { showToast(e.message, 'error'); }
+    });
+  }));
+
+  const pag = document.getElementById('staffPagination');
+  pag.innerHTML = `<div class="small text-muted">${meta.total} staff</div>${renderPagination(meta.total, meta.current_page, meta.per_page, p => { peopleState.page = p; renderStaffTable(); })}`;
+  attachPaginationClicks(pag, p => { peopleState.page = p; renderStaffTable(); });
+}
+
+function staffFormModal(u) {
+  const isEdit = !!u;
+  const body = `<form id="staffForm">
+    <div class="mb-3"><label class="form-label">Name *</label><input type="text" class="form-control" id="sf2_name" value="${u?.name || ''}" required></div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><label class="form-label">Email *</label><input type="email" class="form-control" id="sf2_email" value="${u?.email || ''}" required></div>
+      <div class="col-md-6"><label class="form-label">Phone</label><input type="text" class="form-control" id="sf2_phone" value="${u?.phone || ''}"></div>
+    </div>
+    ${isEdit ? '' : `<div class="mb-3"><label class="form-label">Password *</label><input type="password" class="form-control" id="sf2_password" minlength="8" required><div class="form-text">At least 8 characters. They can change it after logging in.</div></div>`}
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><label class="form-label">Role *</label><select class="form-select" id="sf2_role">${peopleRoles.map(r => `<option value="${r.id}" ${u?.role?.id === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}</select></div>
+      <div class="col-md-6"><label class="form-label">Status</label><select class="form-select" id="sf2_status">
+        <option value="active" ${(!u || u?.status === 'active') ? 'selected' : ''}>Active</option>
+        <option value="inactive" ${u?.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+      </select></div>
+    </div>
+  </form>`;
+  const footer = `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="sf2_save">${isEdit ? 'Update' : 'Add'} Staff</button>`;
+  const modal = formModal(isEdit ? 'Edit Staff' : 'Add Staff', body, footer);
+
+  document.getElementById('sf2_save').addEventListener('click', async () => {
+    const name = document.getElementById('sf2_name').value.trim();
+    const email = document.getElementById('sf2_email').value.trim();
     if (!name || !email) { showToast('Name and email are required', 'error'); return; }
-    const data = { name, email, phone: document.getElementById('uf_phone').value, role: document.getElementById('uf_role').value, status: document.getElementById('uf_status').value, avatar: avatarLetter(name) };
-    if (u) { Object.assign(u, data); showToast('Staff updated', 'success'); }
-    else { USERS.push({ id: 'u'+Date.now(), ...data, permissions: {} }); showToast('Staff added', 'success'); }
-    modal.hide(); renderStaff(document.getElementById('peopleTabContent'));
+    if (!peopleRoles.length) { showToast('No roles available — reload the page and try again', 'error'); return; }
+
+    const payload = {
+      name, email,
+      phone: document.getElementById('sf2_phone').value || null,
+      role_id: +document.getElementById('sf2_role').value,
+      status: document.getElementById('sf2_status').value,
+    };
+    if (!isEdit) payload.password = document.getElementById('sf2_password').value;
+
+    try {
+      if (isEdit) await apiFetch(`/catalog/staff/${u.id}`, { method: 'PUT', body: payload });
+      else await apiFetch('/catalog/staff', { method: 'POST', body: payload });
+      showToast(isEdit ? 'Staff updated' : 'Staff added', 'success');
+      modal.hide();
+      renderStaffTable();
+    } catch (e) { showToast(e.errors ? Object.values(e.errors).flat()[0] : e.message, 'error'); }
   });
 }
 
+/* ===================== Roles & Permissions (display only — mock) ===================== */
+
 function renderRoles(c) {
-  const modules = ['dashboard','pos','products','inventory','sales','purchases','people','orders','accounts','reports','settings'];
-  const moduleLabels = { dashboard:'Dashboard', pos:'POS', products:'Products', inventory:'Inventory', sales:'Sales', purchases:'Purchases', people:'People', orders:'Orders', accounts:'Accounts', reports:'Reports', settings:'Settings' };
+  const roleNames = Object.keys(ROLE_PERMISSIONS);
+  const modules = Object.keys(ROLE_PERMISSIONS[roleNames[0]]);
   c.innerHTML = `
     <div class="card">
-      <div class="card-header">Role & Permission Matrix</div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-bordered mb-0">
-            <thead><tr><th>Module</th>${ROLES.map(r=>`<th class="text-center">${r.name}</th>`).join('')}</tr></thead>
-            <tbody>
-              ${modules.map(m => `<tr><td class="fw-600">${moduleLabels[m]}</td>${ROLES.map(r=>{ const perms = ROLE_PERMISSIONS[r.name]?.[m] || []; return `<td class="text-center">${perms.length?perms.map(p=>`<span class="badge bg-soft-${p==='view'?'info':p==='add'?'success':p==='edit'?'warning':'danger'} me-1">${p}</span>`).join(''):'<span class="text-muted">—</span>'}</td>`;}).join('')}</tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card-header">Role &amp; Permissions Matrix</div>
+      <div class="card-body p-0"><div class="table-responsive"><table class="table">
+        <thead><tr><th>Module</th>${roleNames.map(r => `<th class="text-center">${r}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${modules.map(mod => `
+            <tr><td class="fw-600 text-capitalize">${mod}</td>
+              ${roleNames.map(r => `<td class="text-center small">${(ROLE_PERMISSIONS[r][mod] || []).join(', ') || '<span class="text-muted">—</span>'}</td>`).join('')}
+            </tr>`).join('')}
+        </tbody>
+      </table></div></div>
     </div>
-    <div class="row g-3 mt-3">
-      ${ROLES.map(r=>`<div class="col-md-3"><div class="card"><div class="card-body"><h6 class="fw-700">${r.name}</h6><p class="small text-muted">${r.description}</p><div class="small">${Object.keys(ROLE_PERMISSIONS[r.name]||{}).filter(m=>ROLE_PERMISSIONS[r.name][m].length).length} modules with access</div></div></div></div>`).join('')}
-    </div>`;
+    <p class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>This matrix is informational for now — editing roles/permissions is a Settings-screen feature, not built yet.</p>`;
 }

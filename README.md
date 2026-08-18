@@ -638,7 +638,59 @@ items off as we complete them so it always reflects real project status.
       This closes out Phase 7 entirely.
 
 ### Phase 8 — People (Customers, Suppliers, Staff)
-- [ ] Real CRUD for customers, suppliers, staff
+- [x] Real CRUD for customers, suppliers, staff — three controllers,
+      each upgraded/built to match:
+      - **Customers**: `CustomerController` upgraded from the
+        read-only endpoint built out of necessity in Phase 5 (the POS
+        picker) to full CRUD. `opening_balance`/`current_balance` are
+        deliberately never accepted from a create/update request — a
+        customer's balance only changes through real transactions (a
+        credit sale, a refund), never a direct edit. Delete is
+        blocked with a friendly 422 if the customer has any sales
+        history or a nonzero balance. Added a real `total_purchases`
+        figure (sum of their completed sales) computed via
+        `withSum`/`loadSum` — genuinely more accurate than the old
+        mock's static number.
+      - **Suppliers**: same upgrade, same reasoning. Also fixed a
+        real schema gap along the way — the mock has always had a
+        "contact person" field that never made it into the database;
+        added `suppliers.contact_person` via a new migration and
+        backfilled `SupplierSeeder` with the original mock's contact
+        names.
+      - **Staff**: entirely new — `UserController` didn't exist
+        before this. Creating an account requires a password up
+        front (unlike a customer, this is a real login); editing
+        never touches the password (that's `resetPassword`'s job,
+        not a side effect of a profile edit). Reset generates a
+        random temporary password and returns it **once** in the
+        response — there's no email infrastructure configured (see
+        the Phase 2 password-reset note), so relaying it is a manual
+        admin step for now, not an emailed link. Delete guards
+        against deleting your own account and against deleting anyone
+        with real transaction history (sales, purchases, expenses,
+        stock movements, shifts, payments received).
+      - Added minimal read-only `GET /catalog/roles` for the staff
+        form's role picker (same "just enough for this dependency"
+        precedent as Tax/Customer/Supplier before it).
+      - **A real bug caught before it shipped**: `staff` was
+        registered as a full `apiResource` (including `show`), but
+        `UserController` didn't have a `show()` method — that route
+        would have thrown "undefined method" the first time anyone
+        hit it. Caught during the same validation pass, not after.
+      - **Roles tab stays mock/display-only**, deliberately — editing
+        the role/permission matrix isn't part of this checklist item
+        (it's Settings-screen territory). Fixed a real bug I almost
+        shipped here too: I first wrote the display code assuming
+        `ROLE_PERMISSIONS` was an array of `{role, permissions}`
+        objects; it's actually a plain object keyed by role name.
+        Would have thrown `.map is not a function` the instant anyone
+        opened the tab — caught and fixed before commit.
+      - Customer/Supplier "View" (purchase history + ledger) and
+        "Record Payment" stay honest stubs — ledger is its own next
+        checklist item (needs new `customer_id`/`supplier_id`
+        filtering on Sales/Purchases that doesn't exist yet), and
+        Record Payment belongs to Phase 9 Accounts per the roadmap's
+        own placement, not here.
 - [ ] Customer ledger (purchase history + outstanding due)
 - [ ] Supplier ledger (purchase history + outstanding payable)
 - [ ] Make `/people` tabs deep-linkable (`/people?tab=suppliers`)

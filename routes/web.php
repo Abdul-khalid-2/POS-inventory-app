@@ -8,11 +8,13 @@ use App\Http\Controllers\Api\CustomerController as CustomerApiController;
 use App\Http\Controllers\Api\NotificationController as NotificationApiController;
 use App\Http\Controllers\Api\ProductController as ProductApiController;
 use App\Http\Controllers\Api\PurchaseController as PurchaseApiController;
+use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SaleController as SaleApiController;
 use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\SupplierController as SupplierApiController;
 use App\Http\Controllers\Api\TaxController;
 use App\Http\Controllers\Api\UnitController;
+use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
@@ -123,7 +125,11 @@ Route::middleware('auth')->group(function () {
 
         // Read-only — the POS terminal's customer picker needs real
         // customer IDs; full customer management is Phase 8.
-        Route::get('customers', [CustomerApiController::class, 'index'])->name('customers.index')->middleware('module:people');
+        // Full CRUD now (Phase 8) — was read-only before, just enough
+        // for the POS customer picker. Permission gating now lives in
+        // the controller itself (HasMiddleware), not here, since
+        // different actions need different abilities.
+        Route::apiResource('customers', CustomerApiController::class);
 
         // The POS checkout endpoint itself — see SaleController for
         // why it only accepts product_id + quantity, never a price.
@@ -152,7 +158,20 @@ Route::middleware('auth')->group(function () {
 
         // Read-only — the purchase order form's supplier picker needs
         // real supplier IDs; full supplier management is Phase 8.
-        Route::get('suppliers', [SupplierApiController::class, 'index'])->name('suppliers.index')->middleware('module:people');
+        // Full CRUD now (Phase 8) — was read-only before, just enough
+        // for the purchase order form's supplier picker.
+        Route::apiResource('suppliers', SupplierApiController::class);
+
+        // Staff accounts — real login credentials, so store()
+        // requires a password and reset-password is its own explicit
+        // action (see UserController).
+        Route::apiResource('staff', UserController::class);
+        Route::post('staff/{user}/reset-password', [UserController::class, 'resetPassword'])->name('staff.reset-password');
+
+        // Read-only — just enough for the staff form's role picker.
+        // Full role/permission-matrix editing isn't built (Settings
+        // screen territory).
+        Route::get('roles', [RoleController::class, 'index'])->name('roles.index')->middleware('module:people');
 
         // Purchase orders + goods received (GRN). See PurchaseController
         // for why unit_cost always comes from the product, never the client.
